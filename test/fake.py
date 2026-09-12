@@ -62,22 +62,19 @@ class H(BaseHTTPRequestHandler):
 
 SQL = '''
 .load ./ext/bric
-create temp table results (
+create table if not exists results (
   key text primary key,
   parent text not null,
   confidence text not null check (confidence in ('high', 'medium', 'low')),
   source integer not null,
   quote text not null
 );
-create trigger results_cite before insert on results
+create trigger if not exists results_cite before insert on results
 begin
   select raise(abort, 'quote not found in source ' || new.source)
-   where not exists (select 1 from bric_log where seq = new.source and instr(text, new.quote));
+   where not exists (select 1 from bric_log where seq = new.source and instr(text, squeeze(new.quote)));
 end;
-insert into results
-select r.* from (select key from company where parent is null) as todo
-  join run('Resolve each operator to its parent.', todo.key) as r;
-update company set parent = r.parent, source = r.source from results as r where r.key = company.key;
+select run('results', 'Resolve each operator to its parent.', key) from company where key not in (select key from results);
 '''
 
 
@@ -101,13 +98,13 @@ def main():
     outs = [w.communicate(SQL) for w in workers]
     for w, (out, err) in zip(workers, outs):
         assert not w.returncode, err
-    r = sqlite('select key, parent, source from company order by key;')
-    assert r.stdout == 'acme|Globex|%s\nbolt|Globex|%s\ncog|Globex|%s\nplain||\n' % tuple(
-        sqlite("select seq from bric_log where key = '%s' and kind = 'receipt' and tool = 'browser_markdown' order by seq desc limit 1;" % k).stdout.strip() for k in ['acme', 'bolt', 'cog']), r.stdout
+    r = sqlite('select key, parent, source, quote from results order by key;')
+    assert r.stdout == ''.join('%s|Globex|%s|wholly   owned\nsubsidiary of Globex Corporation\n' % (k, sqlite(
+        "select seq from bric_log where key = '%s' and kind = 'receipt' and tool = 'browser_markdown' order by seq desc limit 1;" % k).stdout.strip()) for k in ['acme', 'bolt', 'cog']), r.stdout
     r = sqlite("select key, sum(kind = 'open'), sum(kind = 'close'), sum(kind = 'error') from bric_log where kind in ('open', 'close', 'error') group by 1 order by 1;")
     assert r.stdout in ('acme|1|1|0\nbolt|1|1|0\ncog|1|1|0\nplain|%d|0|%d\n' % (n, n) for n in (1, 2)), r.stdout
     r = sqlite("select count(*) from bric_log where kind = 'receipt' and text is not null;")
-    assert r.stdout == '6\n', r.stdout
+    assert r.stdout == '3\n', r.stdout
     r = sqlite("select distinct detail from bric_log where key = 'plain' and kind = 'error';")
     assert r.stdout == 'reply without submission: no idea\n', r.stdout
     r = sqlite("select kind, input, output from bric_attempt where key = 'acme';")
@@ -118,11 +115,12 @@ def main():
     assert r.stdout == '1|0\n', r.stdout
     r = sqlite("delete from bric_log where key = 'plain';",
                "insert into bric_log (ts, job, key, attempt, turn, kind) values (datetime('now', '-1 hour'), 'Resolve each operator to its parent.', 'plain', 1, 3, 'call');",
-               "update company set parent = null where key = 'acme';")
+               "delete from results where key = 'acme';",
+               "delete from bric_log where key = 'acme' and kind = 'close';")
     r = sqlite(SQL)
     assert not r.returncode, r.stderr
     r = sqlite("select key, attempt, kind from bric_log where kind in ('open', 'close', 'error') and key in ('plain', 'acme') order by seq;")
-    assert r.stdout == 'acme|1|open\nacme|1|close\nplain|1|error\nplain|2|open\nplain|2|error\n', r.stdout
+    assert r.stdout == 'acme|1|open\nacme|1|error\nacme|2|open\nacme|2|close\nplain|1|error\nplain|2|open\nplain|2|error\n', r.stdout
     r = sqlite("delete from company where key = 'plain';")
     calls = len(H.calls)
     r = sqlite(SQL)
