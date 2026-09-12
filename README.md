@@ -1,7 +1,6 @@
 # bric
 
 research is a table you declare. the model fills it, sqlite validates it.
-[SPEC.md](SPEC.md) is the whole description.
 
 ## build
 
