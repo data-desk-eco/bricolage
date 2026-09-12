@@ -2,6 +2,7 @@
 SQLITE_EXTENSION_INIT1
 #include <curl/curl.h>
 #include <ctype.h>
+#include <errno.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -18,6 +19,7 @@ SQLITE_EXTENSION_INIT1
 
 static sqlite3 *L;
 static const char *file;
+static int errfd = -1;
 
 static const char *env(const char *name, const char *fallback)
 {
@@ -67,6 +69,13 @@ static void squeeze(char *s)
         *w++ = *r;
     }
     *w = 0;
+}
+
+static void alive(sqlite3_context *ctx, int argc, sqlite3_value **argv)
+{
+    (void)argc;
+    int pid = sqlite3_value_int(argv[0]);
+    sqlite3_result_int(ctx, pid > 0 && (!kill(pid, 0) || errno == EPERM));
 }
 
 static void squeeze_fn(sqlite3_context *ctx, int argc, sqlite3_value **argv)
@@ -177,7 +186,7 @@ static pid_t browser(char **url)
     bind(s, (struct sockaddr *)&a, n);
     getsockname(s, (struct sockaddr *)&a, &n);
     close(s);
-    char *cmd = sqlite3_mprintf("exec %s --port %d >/dev/null 2>&1", env("BRIC_BROWSER", "obscura mcp --http"), ntohs(a.sin_port));
+    char *cmd = sqlite3_mprintf("exec %s --port %d >/dev/null", env("BRIC_BROWSER", "obscura mcp --http"), ntohs(a.sin_port));
     char *argv[] = { "sh", "-c", cmd, NULL };
     pid_t pid = 0;
     posix_spawnp(&pid, "sh", NULL, NULL, argv, environ);
@@ -233,8 +242,13 @@ typedef struct {
 
 static char *logrow(Attempt *a, const char *kind, const char *tool, const char *detail)
 {
-    char turn[16];
+    char turn[16], err[65536];
     snprintf(turn, sizeof turn, "%d", a->turn);
+    ssize_t n = read(errfd, err, sizeof err - 1);
+    if (n > 0) {
+        err[n] = 0;
+        sqlite3_free(q(NULL, sql_log, a->brief, a->key, a->attempt, turn, "stderr", NULL, err, NULL));
+    }
     char *seq = q(NULL, sql_log, a->brief, a->key, a->attempt, turn, kind, tool, detail, a->usage);
     sqlite3_free(a->usage);
     a->usage = NULL;
@@ -294,6 +308,14 @@ static char *tools(Attempt *a, const char *given)
                 return err;
             }
             char *found = q(NULL, sql_listed, listed, names);
+            char *clash = q(NULL, sql_clash, cached_tools, found);
+            if (clash) {
+                char *err = sqlite3_mprintf("%s: tool offered twice: %s", url, clash);
+                sqlite3_free(cached_spec);
+                sqlite3_free(clash);
+                cached_spec = NULL;
+                return err;
+            }
             char *merged = q(NULL, sql_concat, cached_tools, found);
             char *routes = q(NULL, sql_routes, cached_routes, found, url);
             sqlite3_free(cached_tools);
@@ -307,10 +329,13 @@ static char *tools(Attempt *a, const char *given)
         }
         sqlite3_free(count);
     }
-    char *submit = q(NULL, sql_submit_tool, a->target);
-    a->tools = q(NULL, sql_push, cached_tools, submit);
+    char *submit = q(NULL, sql_submit_tool, a->target), *pages = q(NULL, sql_pages_tool);
+    char *with = q(NULL, sql_push, cached_tools, submit);
+    a->tools = q(NULL, sql_push, with, pages);
     a->routes = cached_routes;
     sqlite3_free(submit);
+    sqlite3_free(pages);
+    sqlite3_free(with);
     sqlite3_free(spec);
     return NULL;
 }
@@ -368,6 +393,14 @@ static void turn(Attempt *a, const char *system, char **messages)
                 break;
             }
             shown = sqlite3_mprintf("%s", text);
+        } else if (!strcmp(name[i], "pages")) {
+            int rc;
+            char *match = q(NULL, sql_field, input[i], "$", "match");
+            text = q(&rc, sql_pages, match);
+            if (rc) text = sqlite3_mprintf("error: %s", sqlite3_errmsg(L));
+            sqlite3_free(match);
+            shown = receipt(a, name[i], text, NULL);
+            text = NULL;
         } else if (!url[i]) {
             text = sqlite3_mprintf("unknown tool %s", name[i]);
             shown = sqlite3_mprintf("%s", text);
@@ -420,15 +453,23 @@ static char *attempt(const char *target, const char *brief, const char *key, con
     char *ddl = q(NULL, sql_ddl, a.target);
     if (!ddl) return NULL;
     a.insert = q(NULL, sql_insert, a.target);
-    q(NULL, sql_dead, a.brief, a.key, env("BRIC_TIMEOUT", "120"));
+    q(NULL, sql_dead, a.brief, a.key);
     a.attempt = q(NULL, sql_attempt, a.brief, a.key);
     char *closed = q(NULL, sql_closed, a.brief, a.key), *own = NULL, *err = NULL;
     char *system = sqlite3_mprintf("%s\n\n%s", a.brief, ddl);
     pid_t pid = 0;
-    int rc = 1, taken = 0;
+    int rc = 1, taken = 0, p[2], saved = dup(2);
+    char self[16];
+    snprintf(self, sizeof self, "%d", getpid());
+    pipe(p);
+    fcntl(p[0], F_SETFL, O_NONBLOCK);
+    fcntl(p[1], F_SETFL, O_NONBLOCK);
+    dup2(p[1], 2);
+    close(p[1]);
+    errfd = p[0];
     while (!closed && !taken) {
         q(NULL, "begin immediate");
-        q(NULL, sql_open, a.brief, a.key, a.attempt, system, env("BRIC_WORKERS", "4"), env("BRIC_TIMEOUT", "120"));
+        q(NULL, sql_open, a.brief, a.key, a.attempt, system, env("BRIC_WORKERS", "4"), self);
         char *opened = q(NULL, "select changes()");
         q(NULL, "commit");
         rc = !atoi(opened);
@@ -440,8 +481,13 @@ static char *attempt(const char *target, const char *brief, const char *key, con
         if (!taken) sleep(1);
     }
     if (!rc) {
-        if (!spec) pid = browser(&own);
-        err = tools(&a, own ? own : spec);
+        char *given = q(NULL, sql_spec, spec), *url = NULL, *wanted = q(NULL, sql_browser_wanted, given);
+        if (wanted) pid = browser(&url);
+        own = wanted ? q(NULL, sql_browser, given, url) : given;
+        if (wanted) sqlite3_free(given);
+        sqlite3_free(wanted);
+        sqlite3_free(url);
+        err = tools(&a, own);
         if (err) sqlite3_free(logrow(&a, "error", NULL, err));
         else q(NULL, sql_open_tools, a.brief, a.key, a.attempt, a.tools);
         sqlite3_free(err);
@@ -468,12 +514,15 @@ static char *attempt(const char *target, const char *brief, const char *key, con
     sqlite3_free(own);
     sqlite3_free(a.tools);
     sqlite3_free(ddl);
+    dup2(saved, 2);
+    close(saved);
+    close(errfd);
     return kind;
 }
 
 static const char *spec_arg(int argc, sqlite3_value **argv)
 {
-    return argc > 3 && sqlite3_value_type(argv[3]) != SQLITE_NULL ? (const char *)sqlite3_value_text(argv[3]) : env("BRIC_TOOLS", NULL);
+    return argc > 3 && sqlite3_value_type(argv[3]) != SQLITE_NULL ? (const char *)sqlite3_value_text(argv[3]) : env("BRIC_TOOLS", "browser");
 }
 
 static void run(sqlite3_context *ctx, int argc, sqlite3_value **argv)
@@ -538,6 +587,7 @@ int sqlite3_bric_init(sqlite3 *db, char **err, const sqlite3_api_routines *api)
         sqlite3_busy_timeout(L, 30000);
         sqlite3_exec(L, "pragma journal_mode = wal", NULL, NULL, NULL);
     }
+    sqlite3_create_function(L, "alive", 1, SQLITE_UTF8, NULL, alive, NULL, NULL);
     sqlite3_create_function(L, "squeeze", 1, SQLITE_UTF8 | SQLITE_DETERMINISTIC, NULL, squeeze_fn, NULL, NULL);
     sqlite3_create_function(db, "squeeze", 1, SQLITE_UTF8 | SQLITE_DETERMINISTIC, NULL, squeeze_fn, NULL, NULL);
     sqlite3_create_function(db, "run", 3, SQLITE_UTF8 | SQLITE_DIRECTONLY, NULL, run, NULL, NULL);

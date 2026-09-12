@@ -1,11 +1,23 @@
 static const char sql_attempt[] =
     "select 1 + count(*) from bric_log where job = ?1 and key = ?2 and kind in ('close', 'error')";
 
+static const char sql_browser[] =
+    "select iif(json_type(?1) = 'array',"
+    " (select json_group_array(iif(value in ('browser', 'obscura'), ?2, value)) from json_each(?1)),"
+    " (select json_group_object(iif(key in ('browser', 'obscura'), ?2, key), json(value)) from json_each(?1)))";
+
+static const char sql_browser_wanted[] =
+    "select 1 from json_each(?1) where iif(json_type(?1) = 'array', value, key) in ('browser', 'obscura')";
+
 static const char sql_calls[] =
     "select json_group_array(json(value)) from json_each(?1, '$.content') where value ->> 'type' = 'tool_use'";
 
 static const char sql_text[] =
     "update bric_log set text = ?2 where seq = ?1";
+
+static const char sql_clash[] =
+    "select group_concat(value ->> 'name', ', ') from json_each(?2)"
+    " where value ->> 'name' in (select value ->> 'name' from json_each(?1)) or value ->> 'name' in ('submit', 'pages')";
 
 static const char sql_closed[] =
     "select 1 from bric_log where job = ?1 and key = ?2 and kind = 'close'";
@@ -21,11 +33,11 @@ static const char sql_ddl[] =
 
 static const char sql_dead[] =
     "insert or ignore into bric_log (job, key, attempt, kind, detail)"
-    " select job, key, attempt, 'error', 'dead: last row at ' || max(ts)"
+    " select job, key, attempt, 'error', 'dead: pid ' || coalesce(max(iif(kind = 'open', detail ->> 'pid', null)), 'unknown') || ' gone'"
     " from bric_log"
     " where job = ?1 and key = ?2 and attempt is not null"
     " group by attempt"
-    " having sum(kind in ('close', 'error')) = 0 and max(ts) < datetime('now', (-2 * ?3) || ' seconds')";
+    " having sum(kind in ('close', 'error')) = 0 and not alive(max(iif(kind = 'open', detail ->> 'pid', null)))";
 
 static const char sql_field[] =
     "select ?1 -> ?2 ->> ?3";
@@ -66,10 +78,10 @@ static const char sql_no_call[] =
 
 static const char sql_open[] =
     "insert or ignore into bric_log (job, key, attempt, turn, kind, detail)"
-    " select ?1, ?2, ?3, 0, 'open', json_object('system', ?4)"
-    " where ?5 > (select count(*) from ("
+    " select ?1, ?2, ?3, 0, 'open', json_object('system', ?4, 'pid', ?6)"
+    " where cast(?5 as integer) > (select count(*) from ("
     " select 1 from bric_log where attempt is not null group by job, key, attempt"
-    " having sum(kind in ('close', 'error')) = 0 and max(ts) >= datetime('now', (-2 * ?6) || ' seconds')))";
+    " having sum(kind in ('close', 'error')) = 0 and alive(max(iif(kind = 'open', detail ->> 'pid', null)))))";
 
 static const char sql_open_tools[] =
     "update bric_log set detail = json_set(detail, '$.tools', json(?4))"
@@ -77,6 +89,16 @@ static const char sql_open_tools[] =
 
 static const char sql_opened[] =
     "select 1 from bric_log where job = ?1 and key = ?2 and attempt = ?3 and kind = 'open'";
+
+static const char sql_pages[] =
+    "select coalesce(group_concat(s, char(10)), 'no page read so far matches') from ("
+    " select '[seq ' || rowid || '] ' || snippet(bric_page, 0, '', '', ' ... ', 48) as s"
+    " from bric_page where bric_page match ?1 order by rank limit 12)";
+
+static const char sql_pages_tool[] =
+    "select json_object('name', 'pages',"
+    " 'description', 'full-text search over every page any attempt in this database has read; fts5 syntax (\"a phrase\", term1 term2, NEAR, OR); each hit is a [seq N] snippet you may quote and cite as you would the page',"
+    " 'input_schema', json_object('type', 'object', 'properties', json_object('match', json_object('type', 'string')), 'required', json_array('match')))";
 
 static const char sql_push[] =
     "select json_insert(?1, '$[#]', json(?2))";
@@ -150,6 +172,11 @@ static const char sql_schema[] =
     " "
     " create unique index if not exists bric_claim on bric_log (job, key, attempt, kind)"
     " where kind in ('open', 'close', 'error');"
+    " "
+    " create virtual table if not exists bric_page using fts5 (text, content = 'bric_log', content_rowid = 'seq');"
+    " "
+    " create trigger if not exists bric_page_index after update of text on bric_log when new.text is not null"
+    " begin insert into bric_page (rowid, text) values (new.seq, new.text); end;"
     " "
     " create view if not exists bric_attempt as"
     " select l.job, l.key, l.attempt, l.turn, l.ts, l.kind, l.tool, l.detail, u.input, u.output, u.cache_read"

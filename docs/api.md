@@ -1,6 +1,6 @@
 # API
 
-Loading the extension adds three functions, two tables and two views.
+Loading the extension adds four functions, three tables and two views.
 
 ## `job(source, target, brief, tools?)`
 
@@ -15,16 +15,25 @@ Runs one research attempt for `key` and inserts the answer into `target`.
 `target` names a table you have created; its DDL, with any `CHECK`
 constraints and triggers, is the contract the model writes against and the
 one SQLite enforces. `brief` is the task in prose, shared by every key in
-the job. `tools` is an optional MCP spec in the same form as `BRIC_TOOLS`.
+the job. `tools` is an optional MCP spec in the same form as `BRIC_TOOLS`. Besides
+the servers' own tools the model always has `web_search`, `submit` and
+`pages`, a full-text search over every receipt in `bric_log`, so an attempt
+can quote a page any earlier attempt read.
 
 Returns `'close'` when the row was inserted, `'error'` when the model gave
 up, and `NULL` when the attempt did not finish: the key was claimed by
 another worker, the tool server could not be reached, or the turn cap was
 hit. A key that already has a close row returns `'close'` without a model
-call, and an attempt silent for twice `BRIC_TIMEOUT` is treated as dead and
-retried, so a `SELECT run(...)` over the whole to-do list is safe to rerun.
+call, and an attempt whose worker process is gone (`kill -0` on the pid in
+its `open` row) is treated as dead and retried, so a `SELECT run(...)` over
+the whole to-do list is safe to rerun.
 It waits for one of `BRIC_WORKERS` slots before starting a browser. Only
 callable at the top level of a statement, not from views or triggers.
+
+## `alive(pid)`
+
+True when a process with that pid exists. The liveness test behind the
+dead-attempt check and the worker slots.
 
 ## `squeeze(text)`
 
@@ -39,16 +48,23 @@ The append-only log, one row per event. `job` is the brief, `key` and
 
 | `kind`    | what                                                       |
 |-----------|------------------------------------------------------------|
-| `open`    | attempt claimed; `detail` is the system prompt and tool spec |
+| `open`    | attempt claimed; `detail` is the system prompt, tool spec and worker `pid` |
 | `reply`   | a model turn; `detail` is its content verbatim, including any thinking |
 | `call`    | a tool call the model made; `tool` and `detail` (arguments) |
 | `receipt` | a tool result; `text` is its squeezed content, `seq` is what a result row cites as its source |
+| `stderr`  | what the worker and its browser wrote to stderr since the last row, if anything |
 | `close`   | the row was inserted; `detail` is the submission            |
 | `error`   | the attempt failed; `detail` says why                       |
 
 `usage` holds the token counts per turn as JSON. A partial unique index
 over `(job, key, attempt)` for `open`, `close` and `error` is the claim:
 two workers cannot open the same attempt.
+
+## `bric_page`
+
+FTS5 over `bric_log.text`, filled by trigger as receipts are stored. This is
+what the `pages` tool queries; `select * from bric_page where bric_page
+match 'x'` works from the shell too.
 
 ## `bric_attempt`
 
@@ -73,9 +89,9 @@ Everything is an environment variable, read when `run` is called:
 | `BRIC_KEY`          |                                          | sent as `x-api-key`                               |
 | `BRIC_MODEL`        |                                          | model name                                        |
 | `BRIC_URL`          | `https://api.anthropic.com/v1/messages`  | any Anthropic-format messages endpoint            |
-| `BRIC_TOOLS`        |                                          | MCP servers: a URL, a JSON array of URLs, or a JSON object of URL to allowed tool names; `run`'s fourth argument overrides it. Unset, `run` starts a browser per attempt |
+| `BRIC_TOOLS`        | `browser`                                | MCP servers: a URL, a JSON array of URLs, or a JSON object of URL to allowed tool names; `run`'s fourth argument overrides it. The entry `browser` (or `obscura`) is a browser started for the attempt. A tool name offered by two servers fails the attempt |
 | `BRIC_BROWSER`      | `obscura mcp --http`                     | the browser command; `run` appends `--port N`     |
 | `BRIC_TURNS`        | `40`                                     | turns per attempt                                 |
 | `BRIC_WORKERS`      | `4`                                      | attempts live at once; `run` waits for a slot     |
 | `BRIC_SQLITE`       | `sqlite3`                                | the shell workers run in; must be able to `.load` |
-| `BRIC_TIMEOUT`      | `120`                                    | seconds per HTTP call; an attempt silent for twice this is dead |
+| `BRIC_TIMEOUT`      | `120`                                    | seconds per HTTP call                              |

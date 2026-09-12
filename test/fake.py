@@ -111,10 +111,12 @@ def main():
     assert r.stdout == '0\n', r.stdout
     r = sqlite("select distinct detail from bric_log where key = 'plain' and kind = 'error';")
     assert r.stdout == 'reply without submission: no idea\n', r.stdout
+    r = sqlite("select count(*) from bric_page where bric_page match 'globex' and rowid in (select seq from bric_log where key = 'acme' and tool = 'browser_markdown');")
+    assert r.stdout == '1\n', r.stdout
     r = sqlite("select kind, input, output from bric_attempt where key = 'acme';")
     assert r.stdout == 'close|40|20\n', r.stdout
     r = sqlite("select json_array_length(detail -> 'tools'), instr(detail, 'browser_click') from bric_log where key = 'acme' and kind = 'open';")
-    assert r.stdout == '4|0\n', r.stdout
+    assert r.stdout == '5|0\n', r.stdout
     r = sqlite("select instr(text, '[resource dropped]') > 0, instr(text, '  '), instr(detail, '; 1 image ') > 0 from bric_log where key = 'acme' and kind = 'receipt' and tool = 'browser_markdown';")
     assert r.stdout == '1|0|1\n', r.stdout
     r = sqlite("delete from bric_log where key = 'plain';",
@@ -133,7 +135,7 @@ def main():
     r = sqlite(".load ./ext/bric", "create table bare (key text primary key, parent text);", "select run('bare', 'bare url', 'acme');")
     assert not r.returncode, r.stderr
     r = sqlite("select json_array_length(detail -> 'tools') from bric_log where job = 'bare url' and kind = 'open';")
-    assert r.stdout == '5\n', r.stdout
+    assert r.stdout == '6\n', r.stdout
     r = sqlite("select json_array_length(messages), messages ->> '$[1].content[0].type', messages ->> '$[2].content[0].tool_use_id' from bric_transcript where key = 'bolt';")
     assert r.stdout == '8|tool_use|c1\n', r.stdout
 

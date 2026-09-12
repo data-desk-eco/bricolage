@@ -48,9 +48,12 @@ key that has no result, insert them again:
   per attempt. Every page it returns is stored in `bric_log.text`, and a
   result row cites the page it quotes by `seq`, so a trigger like
   `company_parent_cite` can reject a quote that is not on it.
-- **MCP.** Set `BRIC_TOOLS` to a server URL, a list, or a map of URL to
-  allowed tool names. These replace the browser; receipts are logged the
-  same way.
+- **Every page read so far.** `pages` is a full-text search over the
+  receipts of every attempt in the database, so the hundredth operator is
+  resolved against the pages the first ninety-nine read.
+- **MCP.** The browser is one MCP server; `BRIC_TOOLS` names the others
+  as a URL, a list, or a map of URL to allowed tool names, with `browser`
+  as the entry for the browser. Receipts are logged the same way.
 
 Functions, tables, views and configuration are in [docs/api.md](docs/api.md).
 
