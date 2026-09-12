@@ -1,5 +1,7 @@
 .load ./ext/bric
 
+create table if not exists company (key text primary key);
+
 create table if not exists company_parent (
   key        text primary key,
   parent     text not null,
@@ -23,13 +25,20 @@ begin
   );
 end;
 
-select run(
+create trigger if not exists company_spawn
+after insert on company
+begin
+  select spawn(
+    'company_parent',
+    'Resolve each operator to its registered parent company. Cite the page you
+     read it on and quote it exactly.',
+    'company'
+  );
+end;
+
+select spawn(
   'company_parent',
   'Resolve each operator to its registered parent company. Cite the page you
    read it on and quote it exactly.',
-  key
-)
-from company
-where key not in (
-  select key from company_parent
+  'company'
 );

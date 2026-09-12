@@ -14,30 +14,47 @@ not Apple's.
 
 ## Quick start
 
-`company.sql` resolves operators to their parent companies:
+`company.sql` resolves operators to their parent companies. Loading it
+creates the `company` to-do table, the `company_parent` result table and a
+trigger, so that inserting a key is what starts an agent:
 
-    sqlite3 research.db "create table company (key text primary key);
-                         insert into company values ('Petroleum Development Oman');"
     export BRIC_URL=https://api.deepseek.com/anthropic/v1/messages   # or Anthropic's, the default
-    export BRIC_MODEL=deepseek-flash BRIC_KEY=...
-    make run DB=research.db SCRIPT=company.sql WORKERS=4
+    export BRIC_MODEL=deepseek-flash BRIC_KEY=... BRIC_SQLITE=/opt/homebrew/opt/sqlite/bin/sqlite3
+    make run DB=research.db SCRIPT=company.sql
+    sqlite3 research.db -cmd '.load ./ext/bric' \
+      "insert into company values ('Petroleum Development Oman')"
     sqlite3 research.db 'select * from company_parent; select * from bric_attempt'
 
-`make run` starts one sqlite3 per worker and prints the tally when they
-finish; `SQLITE` overrides what it finds. The line it runs per worker is
-
-    sqlite3 research.db < company.sql
-
-so any process manager does as well. Each attempt gets a fresh Obscura,
-started by `run` on a free port and killed when the attempt ends, so a
-worker's memory is one key's pages, not the heaviest page it ever saw.
-Set `BRIC_TOOLS` to bring your own server instead. A build of Obscura with
+`make run` is `sqlite3 research.db < company.sql`. There is no daemon: the
+trigger forks a worker, `sqlite3 research.db "select drain(...)"`, which
+works through every pending key and exits when there are none. Up to
+`BRIC_WORKERS` run at once; an insert while all are busy forks nothing, as
+one of them will reach the new key. The extension must be loaded on the
+connection doing the insert, since the trigger calls into it. Each attempt
+gets a fresh Obscura, started on a free port and killed when the attempt
+ends, so a worker's memory is one key's pages, not the heaviest page it ever
+saw. Set `BRIC_TOOLS` to bring your own server instead. A build of Obscura with
 `--features render` adds `browser_screenshot`, and the model can then read
 pictures.
 
 ## API
 
-Loading the extension adds two functions, one table and two views.
+Loading the extension adds four functions, one table and two views.
+
+### `spawn(target, brief, source, tools?)`
+
+Forks a worker to run every key in `source` (a table with a `key` column)
+that has no row in `target`, unless `BRIC_WORKERS` are already live, and
+returns its pid or `NULL`. Meant to be called from an `after insert`
+trigger on `source`, as `company.sql` does, but works at the top level too
+to pick up rows inserted while the extension was not loaded. The worker is
+a fresh `BRIC_SQLITE` process, so it outlives the connection that inserted.
+
+### `drain(target, brief, source, tools?)`
+
+What the worker runs: `run` over each pending key, in the foreground,
+repeating until a pass makes no progress. A key that has failed `BRIC_TRIES`
+times is left alone.
 
 ### `run(target, brief, key, tools?)`
 
@@ -105,4 +122,7 @@ Everything is an environment variable, read when `run` is called:
 | `BRIC_TOOLS`        |                                          | MCP servers: a URL, a JSON array of URLs, or a JSON object of URL to allowed tool names; `run`'s fourth argument overrides it. Unset, `run` starts a browser per attempt |
 | `BRIC_BROWSER`      | `obscura mcp --http`                     | the browser command; `run` appends `--port N`     |
 | `BRIC_TURNS`        | `40`                                     | turns per attempt                                 |
+| `BRIC_WORKERS`      | `4`                                      | workers `spawn` will have live at once            |
+| `BRIC_TRIES`        | `3`                                      | errors before `drain` gives up on a key           |
+| `BRIC_SQLITE`       | `sqlite3`                                | the shell `spawn` forks; must be able to `.load`  |
 | `BRIC_TIMEOUT`      | `120`                                    | seconds per HTTP call; an attempt silent for twice this is dead |

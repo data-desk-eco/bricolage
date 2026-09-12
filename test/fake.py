@@ -90,7 +90,7 @@ def main():
     server = ThreadingHTTPServer(('127.0.0.1', 0), H)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     base = 'http://127.0.0.1:%d' % server.server_port
-    os.environ.update(BRIC_URL=base + '/v1/messages', BRIC_MODEL='fake', BRIC_KEY='x', BRIC_TIMEOUT='2',
+    os.environ.update(BRIC_SQLITE=os.environ.get('SQLITE', 'sqlite3'), BRIC_URL=base + '/v1/messages', BRIC_MODEL='fake', BRIC_KEY='x', BRIC_TIMEOUT='2',
                       BRIC_TOOLS=json.dumps({base + '/mcp': ['browser_navigate', 'browser_markdown']}))
     for f in ['test/out.db', 'test/out.db-wal', 'test/out.db-shm']:
         if os.path.exists(f):
@@ -136,6 +136,20 @@ def main():
     assert r.stdout == '5\n', r.stdout
     r = sqlite("select json_array_length(messages), messages ->> '$[1].content[0].type', messages ->> '$[2].content[0].tool_use_id' from bric_transcript where key = 'bolt';")
     assert r.stdout == '8|tool_use|c1\n', r.stdout
+
+    r = sqlite(".load ./ext/bric",
+               "create trigger company_spawn after insert on company begin select spawn('results', 'Resolve each operator to its parent.', 'company'); end;",
+               "begin; insert into company (key) values ('dyn'), ('dyn2'); commit;",
+               "select count(*) from bric_log where key = 'dyn';")
+    assert r.stdout == '0\n', r.stdout + r.stderr
+    for _ in range(100):
+        time.sleep(0.2)
+        r = sqlite("select key, parent from results where key like 'dyn%' order by key;")
+        if r.stdout == 'dyn|Globex\ndyn2|Globex\n':
+            break
+    assert r.stdout == 'dyn|Globex\ndyn2|Globex\n', r.stdout
+    r = sqlite("select count(distinct attempt) from bric_log where key like 'dyn%';")
+    assert r.stdout == '1\n', r.stdout
 
     print('ok')
 

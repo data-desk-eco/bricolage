@@ -8,6 +8,8 @@ SQLITE_EXTENSION_INIT1
 #include <string.h>
 #include <unistd.h>
 #include <signal.h>
+#include <fcntl.h>
+#include <dlfcn.h>
 #include <spawn.h>
 #include <sys/socket.h>
 #include <sys/wait.h>
@@ -15,6 +17,8 @@ SQLITE_EXTENSION_INIT1
 #include "sql.h"
 
 static sqlite3 *L;
+static const char *file;
+static int children;
 
 static const char *env(const char *name, const char *fallback)
 {
@@ -405,15 +409,11 @@ static void turn(Attempt *a, const char *system, char **messages)
     sqlite3_free(calls);
 }
 
-static void run(sqlite3_context *ctx, int argc, sqlite3_value **argv)
+static char *attempt(const char *target, const char *brief, const char *key, const char *spec)
 {
-    Attempt a = { (const char *)sqlite3_value_text(argv[0]), (const char *)sqlite3_value_text(argv[1]), (const char *)sqlite3_value_text(argv[2]) };
-    const char *spec = argc > 3 && sqlite3_value_type(argv[3]) != SQLITE_NULL ? (const char *)sqlite3_value_text(argv[3]) : env("BRIC_TOOLS", NULL);
+    Attempt a = { target, brief, key };
     char *ddl = q(NULL, sql_ddl, a.target);
-    if (!ddl) {
-        sqlite3_result_error(ctx, "run: no such table", -1);
-        return;
-    }
+    if (!ddl) return NULL;
     a.insert = q(NULL, sql_insert, a.target);
     q(NULL, sql_dead, a.brief, a.key, env("BRIC_TIMEOUT", "120"));
     a.attempt = q(NULL, sql_attempt, a.brief, a.key);
@@ -426,7 +426,7 @@ static void run(sqlite3_context *ctx, int argc, sqlite3_value **argv)
     int rc = 1;
     char *system = sqlite3_mprintf("%s\n\n%s", a.brief, ddl);
     if (err) sqlite3_free(logrow(&a, "error", NULL, err));
-    else if (!a.tools) sqlite3_result_text(ctx, "close", -1, SQLITE_STATIC);
+    else if (!a.tools) closed = sqlite3_mprintf("close");
     else q(&rc, sql_open, a.brief, a.key, a.attempt, system, a.tools);
     sqlite3_free(err);
     if (!rc) {
@@ -439,8 +439,7 @@ static void run(sqlite3_context *ctx, int argc, sqlite3_value **argv)
         sqlite3_free(messages);
     }
     sqlite3_free(system);
-    char *kind = a.done ? q(NULL, sql_kind, a.brief, a.key, a.attempt) : NULL;
-    if (kind) sqlite3_result_text(ctx, kind, -1, sqlite3_free);
+    char *kind = a.done ? q(NULL, sql_kind, a.brief, a.key, a.attempt) : closed;
     sqlite3_free(a.attempt);
     sqlite3_free(a.insert);
     if (pid) {
@@ -448,9 +447,81 @@ static void run(sqlite3_context *ctx, int argc, sqlite3_value **argv)
         waitpid(pid, NULL, 0);
     }
     sqlite3_free(own);
-    sqlite3_free(closed);
     sqlite3_free(a.tools);
     sqlite3_free(ddl);
+    return kind;
+}
+
+static const char *spec_arg(int argc, sqlite3_value **argv)
+{
+    return argc > 3 && sqlite3_value_type(argv[3]) != SQLITE_NULL ? (const char *)sqlite3_value_text(argv[3]) : env("BRIC_TOOLS", NULL);
+}
+
+static void run(sqlite3_context *ctx, int argc, sqlite3_value **argv)
+{
+    const char *target = (const char *)sqlite3_value_text(argv[0]);
+    char *ddl = q(NULL, sql_ddl, target);
+    if (!ddl) return sqlite3_result_error(ctx, "run: no such table", -1);
+    sqlite3_free(ddl);
+    char *kind = attempt(target, (const char *)sqlite3_value_text(argv[1]), (const char *)sqlite3_value_text(argv[2]), spec_arg(argc, argv));
+    if (kind) sqlite3_result_text(ctx, kind, -1, sqlite3_free);
+}
+
+static void drain(const char *target, const char *brief, const char *source, const char *spec)
+{
+    char *sql = sqlite3_mprintf(sql_pending, source, target, source);
+    int progress;
+    do {
+        sqlite3_stmt *s;
+        progress = 0;
+        sqlite3_prepare_v2(L, sql, -1, &s, NULL);
+        sqlite3_bind_text(s, 1, brief, -1, SQLITE_STATIC);
+        sqlite3_bind_text(s, 2, env("BRIC_TRIES", "3"), -1, SQLITE_STATIC);
+        while (sqlite3_step(s) == SQLITE_ROW) {
+            char *key = sqlite3_mprintf("%s", sqlite3_column_text(s, 0));
+            char *kind = attempt(target, brief, key, spec);
+            progress |= kind != NULL;
+            sqlite3_free(kind);
+            sqlite3_free(key);
+        }
+        sqlite3_finalize(s);
+    } while (progress);
+    sqlite3_free(sql);
+}
+
+static void drain_fn(sqlite3_context *ctx, int argc, sqlite3_value **argv)
+{
+    (void)ctx;
+    q(NULL, "begin immediate");
+    q(NULL, "commit");
+    drain((const char *)sqlite3_value_text(argv[0]), (const char *)sqlite3_value_text(argv[1]), (const char *)sqlite3_value_text(argv[2]), spec_arg(argc, argv));
+}
+
+static void spawn(sqlite3_context *ctx, int argc, sqlite3_value **argv)
+{
+    const char *brief = (const char *)sqlite3_value_text(argv[1]);
+    if (!file) return sqlite3_result_error(ctx, "spawn: database is not a file", -1);
+    while (waitpid(-1, NULL, WNOHANG) > 0) children--;
+    char *live = q(NULL, sql_live, brief, env("BRIC_TIMEOUT", "120"));
+    int busy = atoi(live) > children ? atoi(live) : children;
+    sqlite3_free(live);
+    if (busy >= atoi(env("BRIC_WORKERS", "4"))) return;
+    Dl_info self;
+    dladdr((void *)spawn, &self);
+    char *load = sqlite3_mprintf(".load %s", self.dli_fname);
+    char *sql = sqlite3_mprintf("select drain(%Q, %Q, %Q, %Q)", sqlite3_value_text(argv[0]), brief, sqlite3_value_text(argv[2]), argc > 3 ? sqlite3_value_text(argv[3]) : NULL);
+    pid_t pid = fork();
+    if (!pid) {
+        setsid();
+        int null = open("/dev/null", O_RDWR);
+        for (int fd = 0; fd < 3; fd++) dup2(null, fd);
+        execlp(env("BRIC_SQLITE", "sqlite3"), "sqlite3", file, "-cmd", load, sql, (char *)NULL);
+        _exit(1);
+    }
+    children += pid > 0;
+    sqlite3_result_int(ctx, pid);
+    sqlite3_free(load);
+    sqlite3_free(sql);
 }
 
 int sqlite3_bric_init(sqlite3 *db, char **err, const sqlite3_api_routines *api)
@@ -458,9 +529,10 @@ int sqlite3_bric_init(sqlite3 *db, char **err, const sqlite3_api_routines *api)
     SQLITE_EXTENSION_INIT2(api);
     (void)err;
     curl_global_init(CURL_GLOBAL_DEFAULT);
-    const char *file = sqlite3_db_filename(db, "main");
+    file = sqlite3_db_filename(db, "main");
+    file = file && *file ? sqlite3_mprintf("%s", file) : NULL;
     L = db;
-    if (file && *file && sqlite3_open(file, &L) == SQLITE_OK) {
+    if (file && sqlite3_open(file, &L) == SQLITE_OK) {
         sqlite3_busy_timeout(L, 30000);
         sqlite3_exec(L, "pragma journal_mode = wal", NULL, NULL, NULL);
     }
@@ -469,5 +541,9 @@ int sqlite3_bric_init(sqlite3 *db, char **err, const sqlite3_api_routines *api)
     sqlite3_create_function(db, "squeeze", 1, SQLITE_UTF8 | SQLITE_DETERMINISTIC, NULL, squeeze_fn, NULL, NULL);
     sqlite3_create_function(db, "run", 3, SQLITE_UTF8 | SQLITE_DIRECTONLY, NULL, run, NULL, NULL);
     sqlite3_create_function(db, "run", 4, SQLITE_UTF8 | SQLITE_DIRECTONLY, NULL, run, NULL, NULL);
+    sqlite3_create_function(db, "drain", 3, SQLITE_UTF8 | SQLITE_DIRECTONLY, NULL, drain_fn, NULL, NULL);
+    sqlite3_create_function(db, "drain", 4, SQLITE_UTF8 | SQLITE_DIRECTONLY, NULL, drain_fn, NULL, NULL);
+    sqlite3_create_function(db, "spawn", 3, SQLITE_UTF8 | SQLITE_INNOCUOUS, NULL, spawn, NULL, NULL);
+    sqlite3_create_function(db, "spawn", 4, SQLITE_UTF8 | SQLITE_INNOCUOUS, NULL, spawn, NULL, NULL);
     return SQLITE_OK;
 }

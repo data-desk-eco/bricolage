@@ -3,16 +3,13 @@ CFLAGS ?= -O2 -Wall -Wextra -Wno-missing-field-initializers $(if $(wildcard /opt
 SQLITE ?= $(if $(wildcard /opt/homebrew/opt/sqlite/bin/sqlite3),/opt/homebrew/opt/sqlite/bin/sqlite3,sqlite3)
 DB ?= research.db
 SCRIPT ?= company.sql
-WORKERS ?= 4
 
 ext/bric.$(S): src/bric.c src/sql.h
 	@mkdir -p ext
 	$(CC) $(CFLAGS) -fPIC -shared $< -lcurl -o $@
 
 run: ext/bric.$(S)
-	@trap 'kill $$(jobs -p) 2>/dev/null; wait' EXIT INT TERM; \
-	for i in $$(seq $(WORKERS)); do $(SQLITE) $(DB) < $(SCRIPT) >/dev/null & done; wait; \
-	$(SQLITE) -header -column $(DB) "select kind, count(*) as keys, sum(input) as input, sum(output) as output from bric_attempt group by kind"
+	BRIC_SQLITE=$(SQLITE) $(SQLITE) $(DB) < $(SCRIPT)
 
 test: ext/bric.$(S)
 	SQLITE=$(SQLITE) python3 test/fake.py
