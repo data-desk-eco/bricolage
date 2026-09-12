@@ -3,4 +3,3 @@
 *.db-shm
 /ext/
 **/__pycache__/
-/seed.csv
