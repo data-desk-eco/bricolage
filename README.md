@@ -39,8 +39,22 @@ key that has no result, insert them again:
     insert or replace into company
     select * from company where key not in (select key from company_parent)
 
-Each attempt gets its own Obscura browser, or set `BRIC_TOOLS` to bring
-your own MCP server.
+## Tools
+
+The model gets three kinds of tool:
+
+- **Web search** comes from the provider: the request carries Anthropic's
+  `web_search` server tool, which Anthropic and DeepSeek's Anthropic-format
+  endpoint both honour. Its results are for finding pages, not citing them.
+- **A browser**, [Obscura](https://github.com/louisgoddard/obscura), started
+  fresh for each attempt on a free port and killed when it ends. Everything
+  it returns is stored squeezed in `bric_log.text`, and a result row cites
+  the receipt it quotes by `seq`, which is what lets a trigger such as
+  `company_parent_cite` reject a quote that is not on the page. Set
+  `BRIC_BROWSER` to run it differently.
+- **Anything over MCP.** Set `BRIC_TOOLS` to a server URL, a list of them,
+  or a map of URL to allowed tool names, and their tools replace the
+  browser; receipts are logged the same way.
 
 Functions, tables, views and configuration are in [docs/api.md](docs/api.md).
 
