@@ -21,12 +21,12 @@ not apple's.
                          insert into company values ('Petroleum Development Oman');"
     export BRIC_URL=https://api.deepseek.com/anthropic/v1/messages   # or anthropic's, the default
     export BRIC_MODEL=deepseek-flash BRIC_KEY=...
-    ./bric research.db company.sql 4
+    make run DB=research.db SCRIPT=company.sql WORKERS=4
     sqlite3 research.db 'select * from company_parent; select * from bric_attempt'
 
-`bric` starts one obscura and one sqlite3 per worker and prints the tally
-when they finish; `PORT`, `OBSCURA` and `SQLITE` override what it finds.
-the two lines it runs per worker are
+`make run` starts one obscura and one sqlite3 per worker and prints the
+tally when they finish; `PORT`, `OBSCURA` and `SQLITE` override what it
+finds. the two lines it runs per worker are
 
     obscura mcp --http --port 3001 &
     BRIC_TOOLS=http://127.0.0.1:3001/mcp sqlite3 research.db < company.sql
