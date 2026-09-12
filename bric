@@ -1,0 +1,18 @@
+#!/bin/sh
+# bric research.db company.sql [workers]   one obscura and one sqlite3 per worker
+set -eu
+db=$1 script=$2 n=${3:-4} port=${PORT:-3000} obscura=${OBSCURA:-obscura} sqlite=${SQLITE:-sqlite3}
+trap 'kill $(jobs -p) 2>/dev/null; wait' EXIT INT TERM
+i=0
+while [ $i -lt "$n" ]; do
+  "$obscura" mcp --http --port $((port + i)) >/dev/null 2>&1 &
+  i=$((i + 1))
+done
+i=0
+while [ $i -lt "$n" ]; do
+  until curl -so /dev/null http://127.0.0.1:$((port + i))/mcp; do sleep 0.2; done
+  BRIC_TOOLS=${BRIC_TOOLS:-"http://127.0.0.1:$((port + i))/mcp"} "$sqlite" "$db" < "$script" >/dev/null &
+  i=$((i + 1))
+done
+wait $(jobs -p | tail -n "$n")
+"$sqlite" -header -column "$db" "select kind, count(*) as keys, sum(input) as input, sum(output) as output from bric_attempt group by kind"

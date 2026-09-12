@@ -129,6 +129,12 @@ def main():
     calls = len(H.calls)
     r = sqlite(SQL)
     assert not r.returncode and len(H.calls) == calls, r.stderr
+    os.environ['BRIC_TOOLS'] = base + '/mcp'
+    r = sqlite(".load ./ext/bric", "create table bare (key text primary key, parent text);", "select run('bare', 'bare url', 'acme');")
+    assert not r.returncode, r.stderr
+    r = sqlite("select json_array_length(detail) from bric_log where job = 'bare url' and kind = 'open';")
+    assert r.stdout == '5\n', r.stdout
+
     print('ok')
 
 

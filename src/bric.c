@@ -236,9 +236,10 @@ static char *submit(Attempt *a, const char *input)
     return err;
 }
 
-static char *tools(Attempt *a, const char *spec)
+static char *tools(Attempt *a, const char *given)
 {
     static char *cached_spec, *cached_tools, *cached_routes;
+    char *spec = q(NULL, "select iif(json_valid(?1), ?1, json_array(?1))", given);
     if (!cached_spec || !spec || strcmp(cached_spec, spec)) {
         sqlite3_free(cached_spec);
         sqlite3_free(cached_tools);
@@ -258,6 +259,7 @@ static char *tools(Attempt *a, const char *spec)
             if (r.err || r.status >= 400) {
                 char *err = sqlite3_mprintf("%s: %s", url, r.err ? r.err : listed);
                 sqlite3_free(cached_spec);
+                sqlite3_free(spec);
                 cached_spec = NULL;
                 return err;
             }
@@ -285,6 +287,7 @@ static char *tools(Attempt *a, const char *spec)
     a->tools = q(NULL, "select json_insert(?1, '$[#]', json(?2))", cached_tools, submit);
     a->routes = cached_routes;
     sqlite3_free(submit);
+    sqlite3_free(spec);
     return NULL;
 }
 

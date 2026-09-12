@@ -21,13 +21,19 @@ not apple's.
                          insert into company values ('Petroleum Development Oman');"
     export BRIC_URL=https://api.deepseek.com/anthropic/v1/messages   # or anthropic's, the default
     export BRIC_MODEL=deepseek-flash BRIC_KEY=...
-    obscura mcp --http --port 3001 &
-    BRIC_TOOLS=http://127.0.0.1:3001/mcp sqlite3 research.db < company.sql
+    ./bric research.db company.sql 4
     sqlite3 research.db 'select * from company_parent; select * from bric_attempt'
 
-more workers is the last two lines again on other ports, in parallel: each
-one needs its own obscura. a build of obscura with `--features render` adds
-`browser_screenshot`, and the model can then read pictures.
+`bric` starts one obscura and one sqlite3 per worker and prints the tally
+when they finish; `PORT`, `OBSCURA` and `SQLITE` override what it finds.
+the two lines it runs per worker are
+
+    obscura mcp --http --port 3001 &
+    BRIC_TOOLS=http://127.0.0.1:3001/mcp sqlite3 research.db < company.sql
+
+so any process manager does as well. a build of obscura with
+`--features render` adds `browser_screenshot`, and the model can then read
+pictures.
 
 ## configuration
 
