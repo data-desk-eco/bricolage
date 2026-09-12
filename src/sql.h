@@ -4,10 +4,8 @@ static const char sql_attempt[] =
 static const char sql_calls[] =
     "select json_group_array(json(value)) from json_each(?1, '$.content') where value ->> 'type' = 'tool_use'";
 
-static const char sql_cite[] =
-    "update bric_log set text = ?2"
-    " where seq = ?1"
-    " and exists (select 1 from json_each(?3) where type = 'integer' and value = cast(?1 as integer))";
+static const char sql_text[] =
+    "update bric_log set text = ?2 where seq = ?1";
 
 static const char sql_closed[] =
     "select 1 from bric_log where job = ?1 and key = ?2 and kind = 'close'";
@@ -61,7 +59,8 @@ static const char sql_no_call[] =
     " from json_each(?1, '$.content') where value ->> 'type' = 'text'";
 
 static const char sql_open[] =
-    "insert into bric_log (job, key, attempt, turn, kind, detail) values (?1, ?2, ?3, 0, 'open', json(?4))";
+    "insert into bric_log (job, key, attempt, turn, kind, detail)"
+    " values (?1, ?2, ?3, 0, 'open', json_object('system', ?4, 'tools', json(?5)))";
 
 static const char sql_push[] =
     "select json_insert(?1, '$[#]', json(?2))";
@@ -139,7 +138,31 @@ static const char sql_schema[] =
     " sum(usage ->> 'cache_read') as cache_read"
     " from bric_log"
     " group by job, key"
-    " ) as u using (seq);";
+    " ) as u using (seq);"
+    " "
+    " create view if not exists bric_transcript as"
+    " select job, key, attempt, json_group_array(json(message)) as messages"
+    " from ("
+    " select job, key, attempt, seq, json_object('role', 'user', 'content', key) as message"
+    " from bric_log where kind = 'open'"
+    " union all"
+    " select job, key, attempt, seq, json_object('role', 'assistant', 'content', json(detail))"
+    " from bric_log where kind = 'reply'"
+    " union all"
+    " select job, key, attempt, min(seq), json_object('role', 'user', 'content', json_group_array(json_object("
+    " 'type', 'tool_result', 'tool_use_id', id, 'content', '[seq ' || seq || '] ' || coalesce(text, detail))))"
+    " from ("
+    " select l.job, l.key, l.attempt, l.turn, l.seq, l.text, l.detail,"
+    " (select id from (select value ->> 'id' as id, row_number() over () - 1 as m from json_each(r.detail) where value ->> 'type' = 'tool_use') where m = l.n) as id"
+    " from ("
+    " select *, row_number() over (partition by job, key, attempt, turn order by seq) - 1 as n"
+    " from bric_log where kind = 'receipt'"
+    " ) as l"
+    " join bric_log as r using (job, key, attempt, turn)"
+    " where r.kind = 'reply'"
+    " ) group by job, key, attempt, turn"
+    " order by seq"
+    " ) group by job, key, attempt;";
 
 static const char sql_spec[] =
     "select iif(json_valid(?1), ?1, json_array(?1))";

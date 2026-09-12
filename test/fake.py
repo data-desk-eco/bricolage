@@ -107,13 +107,13 @@ def main():
         "select seq from bric_log where key = '%s' and kind = 'receipt' and tool = 'browser_markdown' order by seq desc limit 1;" % k).stdout.strip()) for k in ['acme', 'bolt', 'cog']), r.stdout
     r = sqlite("select key, sum(kind = 'open'), sum(kind = 'close'), sum(kind = 'error') from bric_log where kind in ('open', 'close', 'error') group by 1 order by 1;")
     assert r.stdout in ('acme|1|1|0\nbolt|1|1|0\ncog|1|1|0\nplain|%d|0|%d\n' % (n, n) for n in (1, 2)), r.stdout
-    r = sqlite("select count(*) from bric_log where kind = 'receipt' and text is not null;")
-    assert r.stdout == '3\n', r.stdout
+    r = sqlite("select count(*) from bric_log where kind = 'receipt' and tool != 'submit' and text is null;")
+    assert r.stdout == '0\n', r.stdout
     r = sqlite("select distinct detail from bric_log where key = 'plain' and kind = 'error';")
     assert r.stdout == 'reply without submission: no idea\n', r.stdout
     r = sqlite("select kind, input, output from bric_attempt where key = 'acme';")
     assert r.stdout == 'close|40|20\n', r.stdout
-    r = sqlite("select json_array_length(detail), instr(detail, 'browser_click') from bric_log where key = 'acme' and kind = 'open';")
+    r = sqlite("select json_array_length(detail -> 'tools'), instr(detail, 'browser_click') from bric_log where key = 'acme' and kind = 'open';")
     assert r.stdout == '4|0\n', r.stdout
     r = sqlite("select instr(text, '[resource dropped]') > 0, instr(text, '  '), instr(detail, '; 1 image ') > 0 from bric_log where key = 'acme' and kind = 'receipt' and tool = 'browser_markdown';")
     assert r.stdout == '1|0|1\n', r.stdout
@@ -132,8 +132,10 @@ def main():
     os.environ['BRIC_TOOLS'] = base + '/mcp'
     r = sqlite(".load ./ext/bric", "create table bare (key text primary key, parent text);", "select run('bare', 'bare url', 'acme');")
     assert not r.returncode, r.stderr
-    r = sqlite("select json_array_length(detail) from bric_log where job = 'bare url' and kind = 'open';")
+    r = sqlite("select json_array_length(detail -> 'tools') from bric_log where job = 'bare url' and kind = 'open';")
     assert r.stdout == '5\n', r.stdout
+    r = sqlite("select json_array_length(messages), messages ->> '$[1].content[0].type', messages ->> '$[2].content[0].tool_use_id' from bric_transcript where key = 'bolt';")
+    assert r.stdout == '8|tool_use|c1\n', r.stdout
 
     print('ok')
 

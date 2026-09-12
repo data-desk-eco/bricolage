@@ -37,7 +37,7 @@ pictures.
 
 ## API
 
-Loading the extension adds two functions, one table and one view.
+Loading the extension adds two functions, one table and two views.
 
 ### `run(target, brief, key, tools?)`
 
@@ -68,7 +68,8 @@ The append-only log, one row per event. `job` is the brief, `key` and
 
 | `kind`    | what                                                       |
 |-----------|------------------------------------------------------------|
-| `open`    | attempt claimed; `detail` is the tool spec                 |
+| `open`    | attempt claimed; `detail` is the system prompt and tool spec |
+| `reply`   | a model turn; `detail` is its content verbatim, including any thinking |
 | `call`    | a tool call the model made; `tool` and `detail` (arguments) |
 | `receipt` | a tool result; `text` is its squeezed content, `seq` is what a result row cites as its source |
 | `close`   | the row was inserted; `detail` is the submission            |
@@ -83,6 +84,14 @@ two workers cannot open the same attempt.
 One row per `(job, key)`: the last log row's `kind`, `turn`, `ts`, `tool`
 and `detail`, with summed `input`, `output` and `cache_read` tokens. This
 is the progress and cost view.
+
+### `bric_transcript`
+
+One row per `(job, key, attempt)` with `messages`, the conversation as the
+API saw it, rebuilt from the log: the key, each `reply`, and each turn's
+receipts as `tool_result` blocks. Together with the `open` row's system
+prompt and tools this is the whole request, so any attempt can be replayed
+or resumed. Images are not kept.
 
 ## Configuration
 

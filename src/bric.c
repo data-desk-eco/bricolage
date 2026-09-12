@@ -225,8 +225,7 @@ static char *infer(const char *body, char **err)
 typedef struct {
     const char *target, *brief, *key;
     char *attempt, *usage, *insert, *tools, *routes;
-    int turn, done, n;
-    char **seq, **text;
+    int turn, done;
 } Attempt;
 
 static char *logrow(Attempt *a, const char *kind, const char *tool, const char *detail)
@@ -236,7 +235,7 @@ static char *logrow(Attempt *a, const char *kind, const char *tool, const char *
     char *seq = q(NULL, sql_log, a->brief, a->key, a->attempt, turn, kind, tool, detail, a->usage);
     sqlite3_free(a->usage);
     a->usage = NULL;
-    a->done |= strcmp(kind, "call") && strcmp(kind, "receipt");
+    a->done |= strcmp(kind, "call") && strcmp(kind, "receipt") && strcmp(kind, "reply");
     return seq;
 }
 
@@ -246,19 +245,17 @@ static char *receipt(Attempt *a, const char *tool, char *text, const char *image
     char *detail = q(NULL, sql_receipt_detail, text, images);
     char *seq = logrow(a, "receipt", tool, detail);
     sqlite3_free(detail);
-    a->seq = sqlite3_realloc(a->seq, ++a->n * sizeof *a->seq);
-    a->text = sqlite3_realloc(a->text, a->n * sizeof *a->text);
-    a->seq[a->n - 1] = seq;
-    a->text[a->n - 1] = text;
-    return q(NULL, sql_receipt_shown, seq, text, "20000", images);
+    q(NULL, sql_text, seq, text);
+    char *shown = q(NULL, sql_receipt_shown, seq, text, "20000", images);
+    sqlite3_free(seq);
+    sqlite3_free(text);
+    return shown;
 }
 
 static char *submit(Attempt *a, const char *input)
 {
     int rc;
     q(NULL, "savepoint bric");
-    for (int i = 0; i < a->n; i++)
-        q(NULL, sql_cite, a->seq[i], a->text[i], input);
     q(&rc, a->insert, a->key, input);
     char *err = rc ? sqlite3_mprintf("%s", sqlite3_errmsg(L)) : NULL;
     if (rc) q(NULL, "rollback to bric");
@@ -328,6 +325,7 @@ static void turn(Attempt *a, const char *system, char **messages)
     }
     a->usage = q(NULL, sql_usage, reply);
     char *content = q(NULL, sql_field, reply, "$", "content");
+    sqlite3_free(logrow(a, "reply", NULL, content));
     char *next = q(NULL, sql_message, *messages, "assistant", content);
     sqlite3_free(content);
     sqlite3_free(*messages);
@@ -426,29 +424,23 @@ static void run(sqlite3_context *ctx, int argc, sqlite3_value **argv)
         err = tools(&a, own ? own : spec);
     }
     int rc = 1;
+    char *system = sqlite3_mprintf("%s\n\n%s", a.brief, ddl);
     if (err) sqlite3_free(logrow(&a, "error", NULL, err));
     else if (!a.tools) sqlite3_result_text(ctx, "close", -1, SQLITE_STATIC);
-    else q(&rc, sql_open, a.brief, a.key, a.attempt, a.tools);
+    else q(&rc, sql_open, a.brief, a.key, a.attempt, system, a.tools);
     sqlite3_free(err);
     if (!rc) {
-        char *system = sqlite3_mprintf("%s\n\n%s", a.brief, ddl);
         char *quoted = q(NULL, sql_quote, a.key);
         char *messages = q(NULL, sql_message, "[]", "user", quoted);
         sqlite3_free(quoted);
         int turns = atoi(env("BRIC_TURNS", "40"));
         for (a.turn = 1; a.turn <= turns && !a.done; a.turn++) turn(&a, system, &messages);
         if (!a.done) sqlite3_free(logrow(&a, "error", NULL, "turn cap"));
-        sqlite3_free(system);
         sqlite3_free(messages);
     }
+    sqlite3_free(system);
     char *kind = a.done ? q(NULL, sql_kind, a.brief, a.key, a.attempt) : NULL;
     if (kind) sqlite3_result_text(ctx, kind, -1, sqlite3_free);
-    for (int i = 0; i < a.n; i++) {
-        sqlite3_free(a.seq[i]);
-        sqlite3_free(a.text[i]);
-    }
-    sqlite3_free(a.seq);
-    sqlite3_free(a.text);
     sqlite3_free(a.attempt);
     sqlite3_free(a.insert);
     if (pid) {
