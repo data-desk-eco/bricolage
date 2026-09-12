@@ -1,8 +1,9 @@
-import json, os, subprocess, sys, threading, time
+import base64, json, os, subprocess, sys, threading, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 PAGE = 'Acme Ltd   is a wholly owned\n\n\tsubsidiary of   Globex Corporation. ' + 'filler text. ' * 3000
 QUOTE = 'wholly owned\nsubsidiary of Globex Corporation'
+PNG = base64.b64encode(bytes.fromhex('89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d4944415478da63f8cfc0f01f0005000201cae1a5d90000000049454e44ae426082')).decode()
 
 
 class H(BaseHTTPRequestHandler):
@@ -26,7 +27,10 @@ class H(BaseHTTPRequestHandler):
         H.calls.append(req)
         turn = sum(m['role'] == 'assistant' for m in req['messages'])
         key = req['messages'][0]['content']
-        results = [c['content'] for m in req['messages'] if m['role'] == 'user' and isinstance(m['content'], list) for c in m['content']]
+        blocks = [c['content'] for m in req['messages'] if m['role'] == 'user' and isinstance(m['content'], list) for c in m['content']]
+        results = [b[0]['text'] if isinstance(b, list) else b for b in blocks]
+        if turn == 1:
+            assert [x['source'] for b in blocks if isinstance(b, list) for x in b[1:]] == [{'type': 'base64', 'media_type': 'image/png', 'data': PNG}] * 2, blocks
         md = next((int(r.split(']')[0][5:]) for r in results if r.startswith('[seq ') and QUOTE in r), None)
         last = results[-1] if results else ''
         quote = 'wholly   owned\nsubsidiary of Globex Corporation'
@@ -57,7 +61,7 @@ class H(BaseHTTPRequestHandler):
                 {'name': 'browser_click', 'description': 'click', 'inputSchema': {'type': 'object', 'properties': {}}}]}})
         name = req['params']['name']
         text = 'Navigated to ' + req['params']['arguments']['url'] if name == 'browser_navigate' else PAGE
-        self.reply({'jsonrpc': '2.0', 'id': req['id'], 'result': {'content': [{'type': 'text', 'text': text}, {'type': 'image', 'data': ''}]}})
+        self.reply({'jsonrpc': '2.0', 'id': req['id'], 'result': {'content': [{'type': 'text', 'text': text}, {'type': 'image', 'data': PNG, 'mimeType': 'image/png'}, {'type': 'resource', 'resource': {}}]}})
 
 
 SQL = '''
@@ -111,8 +115,8 @@ def main():
     assert r.stdout == 'close|40|20\n', r.stdout
     r = sqlite("select json_array_length(detail), instr(detail, 'browser_click') from bric_log where key = 'acme' and kind = 'open';")
     assert r.stdout == '4|0\n', r.stdout
-    r = sqlite("select instr(text, '[image dropped]') > 0, instr(text, '  ') from bric_log where key = 'acme' and kind = 'receipt' and tool = 'browser_markdown';")
-    assert r.stdout == '1|0\n', r.stdout
+    r = sqlite("select instr(text, '[resource dropped]') > 0, instr(text, '  '), instr(detail, '; 1 image ') > 0 from bric_log where key = 'acme' and kind = 'receipt' and tool = 'browser_markdown';")
+    assert r.stdout == '1|0|1\n', r.stdout
     r = sqlite("delete from bric_log where key = 'plain';",
                "insert into bric_log (ts, job, key, attempt, turn, kind) values (datetime('now', '-1 hour'), 'Resolve each operator to its parent.', 'plain', 1, 3, 'call');",
                "delete from results where key = 'acme';",

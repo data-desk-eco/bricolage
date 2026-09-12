@@ -207,18 +207,20 @@ static char *logrow(Attempt *a, const char *kind, const char *tool, const char *
     return seq;
 }
 
-static char *receipt(Attempt *a, const char *tool, char *text)
+static char *receipt(Attempt *a, const char *tool, char *text, const char *images)
 {
     squeeze(text);
-    char *detail = q(NULL, "select length(?1) || ' chars: ' || substr(?1, 1, min(120, coalesce(nullif(instr(?1, char(10)), 0) - 1, 120)))", text);
+    char *detail = q(NULL, "select length(?1) || ' chars: ' || substr(?1, 1, min(120, coalesce(nullif(instr(?1, char(10)), 0) - 1, 120))) || "
+                           "coalesce((select '; ' || count(*) || ' image ' || sum(length(value ->> '$.source.data')) || ' chars' from json_each(?2)), '')", text, images);
     char *seq = logrow(a, "receipt", tool, detail);
     sqlite3_free(detail);
     a->seq = sqlite3_realloc(a->seq, ++a->n * sizeof *a->seq);
     a->text = sqlite3_realloc(a->text, a->n * sizeof *a->text);
     a->seq[a->n - 1] = seq;
     a->text[a->n - 1] = text;
-    return q(NULL, "select '[seq ' || ?1 || '] ' || substr(?2, 1, ?3) || iif(length(?2) > cast(?3 as integer), char(10) || '... ' || (length(?2) - ?3) || ' more characters; page with the tool', '')",
-             seq, text, env("BRIC_RECEIPT", "20000"));
+    return q(NULL, "select json_group_array(json(value)) from (select json_object('type', 'text', 'text', '[seq ' || ?1 || '] ' || substr(?2, 1, ?3) "
+                   "|| iif(length(?2) > cast(?3 as integer), char(10) || '... ' || (length(?2) - ?3) || ' more characters; page with the tool', '')) as value "
+                   "union all select value from json_each(?4))", seq, text, env("BRIC_RECEIPT", "20000"), images);
 }
 
 static char *submit(Attempt *a, const char *input)
@@ -344,13 +346,16 @@ static void turn(Attempt *a, const char *system, char **messages)
             snprintf(status, sizeof status, "%ld", r[i].status);
             text = r[i].err ? sqlite3_mprintf("error: %s", r[i].err)
                  : q(NULL, "select coalesce('error: ' || (?1 ->> '$.error.message'), "
-                           "(select group_concat(iif(value ->> 'type' = 'text', value ->> 'text', '[' || (value ->> 'type') || ' dropped]'), char(10)) from json_each(?1, '$.result.content')), "
-                           "'error: ' || ?2 || ' ' || coalesce(?1, ''))", json, status);
-            shown = receipt(a, name[i], text);
+                           "(select group_concat(iif(value ->> 'type' = 'text', value ->> 'text', '[' || (value ->> 'type') || ' dropped]'), char(10)) from json_each(?1, '$.result.content') where value ->> 'type' != 'image'), "
+                           "iif(?1 -> '$.result.content' is not null, '', 'error: ' || ?2 || ' ' || coalesce(?1, '')))", json, status);
+            char *images = q(NULL, "select json_group_array(json_object('type', 'image', 'source', json_object('type', 'base64', 'media_type', value ->> 'mimeType', 'data', value ->> 'data'))) "
+                                   "from json_each(?1, '$.result.content') where value ->> 'type' = 'image' having count(*) > 0", json);
+            shown = receipt(a, name[i], text, images);
+            sqlite3_free(images);
             text = NULL;
         }
         if (text) sqlite3_free(logrow(a, "receipt", name[i], text));
-        char *more = q(NULL, "select json_insert(?1, '$[#]', json_object('type', 'tool_result', 'tool_use_id', ?2, 'content', ?3))", results, id[i], shown);
+        char *more = q(NULL, "select json_insert(?1, '$[#]', json_object('type', 'tool_result', 'tool_use_id', ?2, 'content', iif(json_valid(?3), json(?3), ?3)))", results, id[i], shown);
         sqlite3_free(results);
         results = more;
         sqlite3_free(shown);
