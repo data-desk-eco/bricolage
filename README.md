@@ -1,10 +1,47 @@
 # bric
 
 research is a table you declare. the model fills it, sqlite validates it.
-[SPEC.md](SPEC.md) is the whole description; `company.sql` the example.
+[SPEC.md](SPEC.md) is the whole description.
 
-    make                      # ext/bric.dylib or .so; needs sqlite3 headers and libcurl
-    make ext/sqlite3          # a shell that can .load, if yours cannot
-    make test                 # against test/fake.py
-    export BRIC_MODEL=... ANTHROPIC_API_KEY=... BRIC_URL=...   # url optional
-    BRIC_TOOLS=http://127.0.0.1:3001/mcp sqlite3 research.db < company.sql   # one obscura per worker
+## build
+
+    make            # ext/bric.dylib or ext/bric.so
+    make test       # two fake workers against test/fake.py
+
+needs a c compiler, libcurl and the sqlite3 headers. the shell that runs
+your script must be able to `.load`: on macos that is homebrew's
+(`brew install sqlite`; the makefile finds it at /opt/homebrew/opt/sqlite),
+not apple's.
+
+## quick start
+
+`company.sql` resolves operators to their parent companies:
+
+    sqlite3 research.db "create table company (key text primary key);
+                         insert into company values ('Petroleum Development Oman');"
+    export BRIC_URL=https://api.deepseek.com/anthropic/v1/messages   # or anthropic's, the default
+    export BRIC_MODEL=deepseek-flash BRIC_KEY=...
+    obscura mcp --http --port 3001 &
+    BRIC_TOOLS=http://127.0.0.1:3001/mcp sqlite3 research.db < company.sql
+    sqlite3 research.db 'select * from company_parent; select * from bric_attempt'
+
+more workers is the last two lines again on other ports, in parallel: each
+one needs its own obscura. a build of obscura with `--features render` adds
+`browser_screenshot`, and the model can then read pictures.
+
+## configuration
+
+everything is an environment variable, read when `run` is called:
+
+| variable            | default                                  | what                                              |
+|---------------------|------------------------------------------|---------------------------------------------------|
+| `BRIC_KEY` |                                          | sent as `x-api-key`                               |
+| `BRIC_MODEL`        |                                          | model name                                        |
+| `BRIC_URL`          | `https://api.anthropic.com/v1/messages`  | any anthropic-format messages endpoint            |
+| `BRIC_TOOLS`        |                                          | mcp servers: a url, a json array of urls, or a json object of url to allowed tool names; `run`'s fourth argument overrides it |
+| `BRIC_TURNS`        | `40`                                     | turns per attempt                                 |
+| `BRIC_TIMEOUT`      | `120`                                    | seconds per http call; an attempt silent for twice this is dead |
+| `BRIC_RECEIPT`      | `20000`                                  | characters of a tool result shown to the model    |
+
+the sql surface is `run(target, brief, key, tools?)`, `squeeze(text)` and
+the `bric_attempt` view; `bric_log` is the table under it. see the spec.

@@ -90,7 +90,7 @@ def main():
     server = ThreadingHTTPServer(('127.0.0.1', 0), H)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     base = 'http://127.0.0.1:%d' % server.server_port
-    os.environ.update(BRIC_URL=base + '/v1/messages', BRIC_MODEL='fake', ANTHROPIC_API_KEY='x', BRIC_TIMEOUT='2',
+    os.environ.update(BRIC_URL=base + '/v1/messages', BRIC_MODEL='fake', BRIC_KEY='x', BRIC_TIMEOUT='2',
                       BRIC_TOOLS=json.dumps({base + '/mcp': ['browser_navigate', 'browser_markdown']}), BRIC_RECEIPT='200')
     for f in ['test/out.db', 'test/out.db-wal', 'test/out.db-shm']:
         if os.path.exists(f):

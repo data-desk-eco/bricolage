@@ -2,6 +2,5 @@
 *.db-wal
 *.db-shm
 /ext/
-/seed.csv
 **/__pycache__/
-.*.swp
+/seed.csv

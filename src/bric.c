@@ -118,7 +118,7 @@ static void http(Req *r, int n)
     struct curl_slist *hs[n];
     int live;
     for (int i = 0; i < n; i++) {
-        char *auth = r[i].inference ? sqlite3_mprintf("x-api-key: %s", env("ANTHROPIC_API_KEY", ""))
+        char *auth = r[i].inference ? sqlite3_mprintf("x-api-key: %s", env("BRIC_KEY", ""))
                    : *session(r[i].url) ? sqlite3_mprintf("mcp-session-id: %s", *session(r[i].url)) : NULL;
         r[i].out = r[i].err = NULL;
         r[i].n = r[i].status = 0;
