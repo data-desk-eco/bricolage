@@ -24,14 +24,15 @@ not apple's.
     make run DB=research.db SCRIPT=company.sql WORKERS=4
     sqlite3 research.db 'select * from company_parent; select * from bric_attempt'
 
-`make run` starts one obscura and one sqlite3 per worker and prints the
-tally when they finish; `PORT`, `OBSCURA` and `SQLITE` override what it
-finds. the two lines it runs per worker are
+`make run` starts one sqlite3 per worker and prints the tally when they
+finish; `SQLITE` overrides what it finds. the line it runs per worker is
 
-    obscura mcp --http --port 3001 &
-    BRIC_TOOLS=http://127.0.0.1:3001/mcp sqlite3 research.db < company.sql
+    sqlite3 research.db < company.sql
 
-so any process manager does as well. a build of obscura with
+so any process manager does as well. each attempt gets a fresh obscura,
+started by `run` on a free port and killed when the attempt ends, so a
+worker's memory is one key's pages, not the heaviest page it ever saw.
+set `BRIC_TOOLS` to bring your own server instead. a build of obscura with
 `--features render` adds `browser_screenshot`, and the model can then read
 pictures.
 
@@ -44,7 +45,8 @@ everything is an environment variable, read when `run` is called:
 | `BRIC_KEY` |                                          | sent as `x-api-key`                               |
 | `BRIC_MODEL`        |                                          | model name                                        |
 | `BRIC_URL`          | `https://api.anthropic.com/v1/messages`  | any anthropic-format messages endpoint            |
-| `BRIC_TOOLS`        |                                          | mcp servers: a url, a json array of urls, or a json object of url to allowed tool names; `run`'s fourth argument overrides it |
+| `BRIC_TOOLS`        |                                          | mcp servers: a url, a json array of urls, or a json object of url to allowed tool names; `run`'s fourth argument overrides it. unset, `run` starts a browser per attempt |
+| `BRIC_BROWSER`      | `obscura mcp --http`                     | the browser command; `run` appends `--port N` |
 | `BRIC_TURNS`        | `40`                                     | turns per attempt                                 |
 | `BRIC_TIMEOUT`      | `120`                                    | seconds per http call; an attempt silent for twice this is dead |
 

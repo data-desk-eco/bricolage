@@ -7,6 +7,11 @@ SQLITE_EXTENSION_INIT1
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <signal.h>
+#include <spawn.h>
+#include <sys/socket.h>
+#include <sys/wait.h>
+#include <netinet/in.h>
 #include "sql.h"
 
 static sqlite3 *L;
@@ -157,6 +162,34 @@ static void http(Req *r, int n)
         curl_slist_free_all(hs[i]);
     }
     curl_multi_cleanup(m);
+}
+
+extern char **environ;
+
+static pid_t browser(char **url)
+{
+    struct sockaddr_in a = { .sin_family = AF_INET, .sin_addr.s_addr = htonl(INADDR_LOOPBACK) };
+    socklen_t n = sizeof a;
+    int s = socket(AF_INET, SOCK_STREAM, 0);
+    bind(s, (struct sockaddr *)&a, n);
+    getsockname(s, (struct sockaddr *)&a, &n);
+    close(s);
+    char *cmd = sqlite3_mprintf("exec %s --port %d >/dev/null 2>&1", env("BRIC_BROWSER", "obscura mcp --http"), ntohs(a.sin_port));
+    char *argv[] = { "sh", "-c", cmd, NULL };
+    pid_t pid = 0;
+    posix_spawnp(&pid, "sh", NULL, NULL, argv, environ);
+    sqlite3_free(cmd);
+    *url = sqlite3_mprintf("http://127.0.0.1:%d/mcp", ntohs(a.sin_port));
+    for (int i = 0; i < 500; i++) {
+        Req r = { *url, "{\"jsonrpc\":\"2.0\",\"id\":0,\"method\":\"tools/list\"}", 0 };
+        http(&r, 1);
+        int up = !r.err;
+        sqlite3_free(r.out);
+        sqlite3_free(r.err);
+        if (up) break;
+        usleep(10000);
+    }
+    return pid;
 }
 
 static char *unsse(char *body)
@@ -386,7 +419,12 @@ static void run(sqlite3_context *ctx, int argc, sqlite3_value **argv)
     a.insert = q(NULL, sql_insert, a.target);
     q(NULL, sql_dead, a.brief, a.key, env("BRIC_TIMEOUT", "120"));
     a.attempt = q(NULL, sql_attempt, a.brief, a.key);
-    char *err = q(NULL, sql_closed, a.brief, a.key) ? NULL : tools(&a, spec);
+    char *closed = q(NULL, sql_closed, a.brief, a.key), *own = NULL, *err = NULL;
+    pid_t pid = 0;
+    if (!closed) {
+        if (!spec) pid = browser(&own);
+        err = tools(&a, own ? own : spec);
+    }
     int rc = 1;
     if (err) sqlite3_free(logrow(&a, "error", NULL, err));
     else if (!a.tools) sqlite3_result_text(ctx, "close", -1, SQLITE_STATIC);
@@ -413,6 +451,12 @@ static void run(sqlite3_context *ctx, int argc, sqlite3_value **argv)
     sqlite3_free(a.text);
     sqlite3_free(a.attempt);
     sqlite3_free(a.insert);
+    if (pid) {
+        kill(pid, SIGTERM);
+        waitpid(pid, NULL, 0);
+    }
+    sqlite3_free(own);
+    sqlite3_free(closed);
     sqlite3_free(a.tools);
     sqlite3_free(ddl);
 }
