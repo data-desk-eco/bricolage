@@ -15,8 +15,8 @@ not Apple's.
 ## Quick start
 
 `company.sql` resolves operators to their parent companies. Loading it
-creates the `company` to-do table, the `company_parent` result table and a
-trigger, so that inserting a key is what starts an agent:
+creates the `company` to-do table and the `company_parent` result table,
+and registers the job, so that inserting a key is what starts an agent:
 
     export BRIC_URL=https://api.deepseek.com/anthropic/v1/messages   # or Anthropic's, the default
     export BRIC_MODEL=deepseek-flash BRIC_KEY=... BRIC_SQLITE=/opt/homebrew/opt/sqlite/bin/sqlite3
@@ -25,12 +25,14 @@ trigger, so that inserting a key is what starts an agent:
       "insert into company values ('Petroleum Development Oman')"
     sqlite3 research.db 'select * from company_parent; select * from bric_attempt'
 
-`make run` is `sqlite3 research.db < company.sql`. There is no daemon: the
-trigger forks a worker, `sqlite3 research.db "select drain(...)"`, which
-works through every pending key and exits when there are none. Up to
-`BRIC_WORKERS` run at once; an insert while all are busy forks nothing, as
-one of them will reach the new key. The extension must be loaded on the
-connection doing the insert, since the trigger calls into it. Each attempt
+`make run` is `sqlite3 research.db < company.sql`. There is no daemon: a
+connection with the extension loaded watches its own inserts, and one into
+a registered table forks a worker, `sqlite3 research.db "select
+drain(...)"`, which works through every pending key and exits when there
+are none. Up to `BRIC_WORKERS` run at once; an insert while all are busy
+forks nothing, as one of them will reach the new key. A connection without
+the extension inserts as normal and its keys wait for the next one that has
+it, or for `make run` again, which also drains. Each attempt
 gets a fresh Obscura, started on a free port and killed when the attempt
 ends, so a worker's memory is one key's pages, not the heaviest page it ever
 saw. Set `BRIC_TOOLS` to bring your own server instead. A build of Obscura with
@@ -39,18 +41,15 @@ pictures.
 
 ## API
 
-Loading the extension adds four functions, one table and two views.
+Loading the extension adds four functions, two tables and two views.
 
-### `spawn(target, brief, source, tools?)`
+### `job(source, target, brief, tools?)`
 
-Forks a worker to run every key in `source` (a table with a `key` column)
-that has no row in `target`, unless `BRIC_WORKERS` are already live, and
-returns its pid or `NULL`. Meant to be called from an `after insert`
-trigger on `source`, as `company.sql` does. Every worker drains the whole
-table, so one insert also picks up anything left pending by a crash; to
-kick that off without a new key, re-fire the trigger with
-`insert or replace into company select * from company`. The worker is a
-fresh `BRIC_SQLITE` process, so it outlives the connection that inserted.
+Registers a job in `bric_job`: keys are rows of `source` (a table with a
+`key` column) that have no row in `target`. From then on, on any
+connection with the extension loaded, an insert into `source` forks a
+worker unless `BRIC_WORKERS` are already live. `job` itself forks one too,
+to pick up whatever is pending. Workers outlive the connection.
 
 ### `drain(target, brief, source, tools?)`
 
@@ -124,7 +123,7 @@ Everything is an environment variable, read when `run` is called:
 | `BRIC_TOOLS`        |                                          | MCP servers: a URL, a JSON array of URLs, or a JSON object of URL to allowed tool names; `run`'s fourth argument overrides it. Unset, `run` starts a browser per attempt |
 | `BRIC_BROWSER`      | `obscura mcp --http`                     | the browser command; `run` appends `--port N`     |
 | `BRIC_TURNS`        | `40`                                     | turns per attempt                                 |
-| `BRIC_WORKERS`      | `4`                                      | workers `spawn` will have live at once            |
+| `BRIC_WORKERS`      | `4`                                      | workers an insert will have live at once          |
 | `BRIC_TRIES`        | `3`                                      | errors before `drain` gives up on a key           |
-| `BRIC_SQLITE`       | `sqlite3`                                | the shell `spawn` forks; must be able to `.load`  |
+| `BRIC_SQLITE`       | `sqlite3`                                | the shell workers run in; must be able to `.load` |
 | `BRIC_TIMEOUT`      | `120`                                    | seconds per HTTP call; an attempt silent for twice this is dead |

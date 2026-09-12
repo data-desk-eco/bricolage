@@ -138,10 +138,10 @@ def main():
     assert r.stdout == '8|tool_use|c1\n', r.stdout
 
     r = sqlite(".load ./ext/bric",
-               "create trigger company_spawn after insert on company begin select spawn('results', 'Resolve each operator to its parent.', 'company'); end;",
+               "select job('company', 'results', 'Resolve each operator to its parent.') is null;",
                "begin; insert into company (key) values ('dyn'), ('dyn2'); commit;",
                "select count(*) from bric_log where key = 'dyn';")
-    assert r.stdout == '0\n', r.stdout + r.stderr
+    assert r.stdout == '1\n0\n', (r.returncode, r.stdout, r.stderr)
     for _ in range(100):
         time.sleep(0.2)
         r = sqlite("select key, parent from results where key like 'dyn%' order by key;")

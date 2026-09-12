@@ -409,9 +409,15 @@ static void turn(Attempt *a, const char *system, char **messages)
     sqlite3_free(calls);
 }
 
+static void schema(void)
+{
+    sqlite3_exec(L, sql_schema, NULL, NULL, NULL);
+}
+
 static char *attempt(const char *target, const char *brief, const char *key, const char *spec)
 {
     Attempt a = { target, brief, key };
+    schema();
     char *ddl = q(NULL, sql_ddl, a.target);
     if (!ddl) return NULL;
     a.insert = q(NULL, sql_insert, a.target);
@@ -497,10 +503,8 @@ static void drain_fn(sqlite3_context *ctx, int argc, sqlite3_value **argv)
     drain((const char *)sqlite3_value_text(argv[0]), (const char *)sqlite3_value_text(argv[1]), (const char *)sqlite3_value_text(argv[2]), spec_arg(argc, argv));
 }
 
-static void spawn(sqlite3_context *ctx, int argc, sqlite3_value **argv)
+static void spawn(const char *target, const char *brief, const char *source, const char *spec)
 {
-    const char *brief = (const char *)sqlite3_value_text(argv[1]);
-    if (!file) return sqlite3_result_error(ctx, "spawn: database is not a file", -1);
     while (waitpid(-1, NULL, WNOHANG) > 0) children--;
     char *live = q(NULL, sql_live, brief, env("BRIC_TIMEOUT", "120"));
     int busy = atoi(live) > children ? atoi(live) : children;
@@ -509,7 +513,7 @@ static void spawn(sqlite3_context *ctx, int argc, sqlite3_value **argv)
     Dl_info self;
     dladdr((void *)spawn, &self);
     char *load = sqlite3_mprintf(".load %s", self.dli_fname);
-    char *sql = sqlite3_mprintf("select drain(%Q, %Q, %Q, %Q)", sqlite3_value_text(argv[0]), brief, sqlite3_value_text(argv[2]), argc > 3 ? sqlite3_value_text(argv[3]) : NULL);
+    char *sql = sqlite3_mprintf("select drain(%Q, %Q, %Q, %Q)", target, brief, source, spec);
     pid_t pid = fork();
     if (!pid) {
         setsid();
@@ -519,9 +523,31 @@ static void spawn(sqlite3_context *ctx, int argc, sqlite3_value **argv)
         _exit(1);
     }
     children += pid > 0;
-    sqlite3_result_int(ctx, pid);
     sqlite3_free(load);
     sqlite3_free(sql);
+}
+
+static void hook(void *arg, int op, const char *dbname, const char *table, sqlite3_int64 rowid)
+{
+    (void)arg, (void)dbname, (void)rowid;
+    if (op != SQLITE_INSERT) return;
+    sqlite3_stmt *s;
+    if (sqlite3_prepare_v2(L, sql_job, -1, &s, NULL)) return;
+    sqlite3_bind_text(s, 1, table, -1, SQLITE_STATIC);
+    sqlite3_bind_text(s, 2, env("BRIC_TOOLS", NULL), -1, SQLITE_STATIC);
+    if (sqlite3_step(s) == SQLITE_ROW)
+        spawn((const char *)sqlite3_column_text(s, 0), (const char *)sqlite3_column_text(s, 1), table, (const char *)sqlite3_column_text(s, 2));
+    sqlite3_finalize(s);
+}
+
+static void job(sqlite3_context *ctx, int argc, sqlite3_value **argv)
+{
+    const char *source = (const char *)sqlite3_value_text(argv[0]), *target = (const char *)sqlite3_value_text(argv[1]);
+    const char *brief = (const char *)sqlite3_value_text(argv[2]), *spec = argc > 3 ? (const char *)sqlite3_value_text(argv[3]) : NULL;
+    if (!file) return sqlite3_result_error(ctx, "job: database is not a file", -1);
+    schema();
+    q(NULL, sql_job_set, source, target, brief, spec);
+    spawn(target, brief, source, spec ? spec : env("BRIC_TOOLS", NULL));
 }
 
 int sqlite3_bric_init(sqlite3 *db, char **err, const sqlite3_api_routines *api)
@@ -536,14 +562,14 @@ int sqlite3_bric_init(sqlite3 *db, char **err, const sqlite3_api_routines *api)
         sqlite3_busy_timeout(L, 30000);
         sqlite3_exec(L, "pragma journal_mode = wal", NULL, NULL, NULL);
     }
-    sqlite3_exec(L, sql_schema, NULL, NULL, NULL);
     sqlite3_create_function(L, "squeeze", 1, SQLITE_UTF8 | SQLITE_DETERMINISTIC, NULL, squeeze_fn, NULL, NULL);
     sqlite3_create_function(db, "squeeze", 1, SQLITE_UTF8 | SQLITE_DETERMINISTIC, NULL, squeeze_fn, NULL, NULL);
     sqlite3_create_function(db, "run", 3, SQLITE_UTF8 | SQLITE_DIRECTONLY, NULL, run, NULL, NULL);
     sqlite3_create_function(db, "run", 4, SQLITE_UTF8 | SQLITE_DIRECTONLY, NULL, run, NULL, NULL);
     sqlite3_create_function(db, "drain", 3, SQLITE_UTF8 | SQLITE_DIRECTONLY, NULL, drain_fn, NULL, NULL);
     sqlite3_create_function(db, "drain", 4, SQLITE_UTF8 | SQLITE_DIRECTONLY, NULL, drain_fn, NULL, NULL);
-    sqlite3_create_function(db, "spawn", 3, SQLITE_UTF8 | SQLITE_INNOCUOUS, NULL, spawn, NULL, NULL);
-    sqlite3_create_function(db, "spawn", 4, SQLITE_UTF8 | SQLITE_INNOCUOUS, NULL, spawn, NULL, NULL);
+    sqlite3_create_function(db, "job", 3, SQLITE_UTF8 | SQLITE_DIRECTONLY, NULL, job, NULL, NULL);
+    sqlite3_create_function(db, "job", 4, SQLITE_UTF8 | SQLITE_DIRECTONLY, NULL, job, NULL, NULL);
+    sqlite3_update_hook(db, hook, NULL);
     return SQLITE_OK;
 }

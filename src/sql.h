@@ -35,6 +35,12 @@ static const char sql_insert[] =
     " || group_concat('json_extract(?2, ''$.\"' || name || '\"'')')"
     " from pragma_table_info(?1) where name != 'key'";
 
+static const char sql_job[] =
+    "select target, brief, coalesce(tools, ?2) from bric_job where source = ?1";
+
+static const char sql_job_set[] =
+    "insert or replace into bric_job (source, target, brief, tools) values (?1, ?2, ?3, ?4)";
+
 static const char sql_kind[] =
     "select kind from bric_log where job = ?1 and key = ?2 and attempt = ?3 and kind in ('close', 'error')";
 
@@ -118,7 +124,14 @@ static const char sql_routes[] =
     "select json_patch(?1, (select json_group_object(value ->> 'name', ?3) from json_each(?2)))";
 
 static const char sql_schema[] =
-    "create table if not exists bric_log ("
+    "create table if not exists bric_job ("
+    " source text primary key,"
+    " target text not null,"
+    " brief  text not null,"
+    " tools  text"
+    ");"
+    " "
+    " create table if not exists bric_log ("
     " seq     integer primary key,"
     " ts      text not null default (datetime('now')),"
     " job     text not null,"
@@ -132,7 +145,7 @@ static const char sql_schema[] =
     " usage   text"
     " ) strict;"
     " "
-    " create index if not exists bric_job on bric_log (job, key);"
+    " create index if not exists bric_log_job on bric_log (job, key);"
     " "
     " create unique index if not exists bric_claim on bric_log (job, key, attempt, kind)"
     " where kind in ('open', 'close', 'error');"

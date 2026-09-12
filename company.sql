@@ -25,13 +25,9 @@ begin
   );
 end;
 
-create trigger if not exists company_spawn
-after insert on company
-begin
-  select spawn(
-    'company_parent',
-    'Resolve each operator to its registered parent company. Cite the page you
-     read it on and quote it exactly.',
-    'company'
-  );
-end;
+select job(
+  'company',
+  'company_parent',
+  'Resolve each operator to its registered parent company. Cite the page you
+   read it on and quote it exactly.'
+);
