@@ -26,8 +26,6 @@ not Apple's.
 creates the `company` to-do table and the `company_parent` result table,
 and registers the job, so that inserting a key is what starts an agent:
 
-    export BRIC_URL=https://api.deepseek.com/anthropic/v1/messages   # or Anthropic's, the default
-    export BRIC_MODEL=deepseek-flash BRIC_KEY=... BRIC_SQLITE=/opt/homebrew/opt/sqlite/bin/sqlite3
     sqlite3 research.db < company.sql
     sqlite3 research.db -cmd '.load ./ext/bric' \
       "insert into company values ('Petroleum Development Oman')"
