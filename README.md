@@ -29,7 +29,6 @@ and registers the job, so that inserting a key is what starts an agent:
     sqlite3 research.db < company.sql
     sqlite3 research.db -cmd '.load ./ext/bric' \
       "insert into company values ('Petroleum Development Oman')"
-    sqlite3 research.db 'select * from company_parent; select * from bric_attempt'
 
 There is no daemon. Each row inserted on a connection with the extension
 loaded gets a worker of its own, which outlives the connection; only
