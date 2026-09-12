@@ -41,7 +41,6 @@ everything is an environment variable, read when `run` is called:
 | `BRIC_TOOLS`        |                                          | mcp servers: a url, a json array of urls, or a json object of url to allowed tool names; `run`'s fourth argument overrides it |
 | `BRIC_TURNS`        | `40`                                     | turns per attempt                                 |
 | `BRIC_TIMEOUT`      | `120`                                    | seconds per http call; an attempt silent for twice this is dead |
-| `BRIC_RECEIPT`      | `20000`                                  | characters of a tool result shown to the model    |
 
 the sql surface is `run(target, brief, key, tools?)`, `squeeze(text)` and
 the `bric_attempt` view; `bric_log` is the table under it. see the spec.
