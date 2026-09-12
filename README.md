@@ -1,10 +1,10 @@
 # Bricolage
 
 Bricolage is a SQLite extension for building datasets using LLM research
-agents. Agents `SELECT` work from a shared to-do list defined as a table,
-browse the web and call tools over MCP, then write to a result table with
-typed columns, source URLs and optional validation triggers, with everything
-logged.
+agents. Inserting rows into a to-do table spawns parallel agents equipped
+with web search, the [Obscura](https://github.com/h4ckf0r0day/obscura)
+browser and tools over MCP. Each agent writes to a typed result table with
+validation and all operations are logged in the database.
 
 Use Bricolage to enrich existing datasets (e.g. take a list of LNG terminal
 names, find their operators) or to perform repeated research tasks with a
