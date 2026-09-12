@@ -137,6 +137,7 @@ def main():
     r = sqlite("select json_array_length(messages), messages ->> '$[1].content[0].type', messages ->> '$[2].content[0].tool_use_id' from bric_transcript where key = 'bolt';")
     assert r.stdout == '8|tool_use|c1\n', r.stdout
 
+    os.environ['BRIC_WORKERS'] = '1'
     r = sqlite(".load ./ext/bric",
                "select job('company', 'results', 'Resolve each operator to its parent.') is null;",
                "begin; insert into company (key) values ('dyn'), ('dyn2'); commit;",

@@ -49,11 +49,6 @@ static const char sql_listed[] =
     " from json_each(?1, '$.result.tools')"
     " where ?2 is null or value ->> 'name' in (select value from json_each(?2))";
 
-static const char sql_live[] =
-    "select count(*) from ("
-    " select 1 from bric_log where job = ?1 and attempt is not null group by key, attempt"
-    " having sum(kind in ('close', 'error')) = 0 and max(ts) >= datetime('now', (-2 * ?2) || ' seconds'))";
-
 static const char sql_log[] =
     "insert into bric_log (job, key, attempt, turn, kind, tool, detail, usage)"
     " values (?1, ?2, ?3, ?4, ?5, ?6, ?7, json(?8))"
@@ -70,12 +65,18 @@ static const char sql_no_call[] =
     " from json_each(?1, '$.content') where value ->> 'type' = 'text'";
 
 static const char sql_open[] =
-    "insert into bric_log (job, key, attempt, turn, kind, detail)"
-    " values (?1, ?2, ?3, 0, 'open', json_object('system', ?4, 'tools', json(?5)))";
+    "insert or ignore into bric_log (job, key, attempt, turn, kind, detail)"
+    " select ?1, ?2, ?3, 0, 'open', json_object('system', ?4)"
+    " where ?5 > (select count(*) from ("
+    " select 1 from bric_log where attempt is not null group by job, key, attempt"
+    " having sum(kind in ('close', 'error')) = 0 and max(ts) >= datetime('now', (-2 * ?6) || ' seconds')))";
 
-static const char sql_pending[] =
-    "select key from \"%w\" where key not in (select key from \"%w\")"
-    " and (select count(*) from bric_log where job = ?1 and key = \"%w\".key and kind = 'error') < ?2";
+static const char sql_open_tools[] =
+    "update bric_log set detail = json_set(detail, '$.tools', json(?4))"
+    " where job = ?1 and key = ?2 and attempt = ?3 and kind = 'open'";
+
+static const char sql_opened[] =
+    "select 1 from bric_log where job = ?1 and key = ?2 and attempt = ?3 and kind = 'open'";
 
 static const char sql_push[] =
     "select json_insert(?1, '$[#]', json(?2))";
