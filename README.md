@@ -46,7 +46,7 @@ The model gets three kinds of tool:
 - **Web search** comes from the provider: the request carries Anthropic's
   `web_search` server tool, which Anthropic and DeepSeek's Anthropic-format
   endpoint both honour. Its results are for finding pages, not citing them.
-- **A browser**, [Obscura](https://github.com/louisgoddard/obscura), started
+- **A browser**, [Obscura](https://github.com/h4ckf0r0day/obscura), started
   fresh for each attempt on a free port and killed when it ends. Everything
   it returns is stored squeezed in `bric_log.text`, and a result row cites
   the receipt it quotes by `seq`, which is what lets a trigger such as
