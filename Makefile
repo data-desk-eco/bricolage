@@ -7,9 +7,12 @@ SCRIPT ?= company.sql
 WORKERS ?= 4
 PORT ?= 3000
 
-ext/bric.$(S): src/bric.c
+ext/sql.h: sql/*.sql
 	@mkdir -p ext
-	$(CC) $(CFLAGS) -fPIC -shared $< -lcurl -o $@
+	@for f in $^; do printf 'static const char sql_%s[] =\n' $$(basename $$f .sql); sed 's/\\/\\\\/g; s/"/\\"/g; s/^/"/; s/$$/\\n"/' $$f; echo ';'; done > $@
+
+ext/bric.$(S): src/bric.c ext/sql.h
+	$(CC) $(CFLAGS) -Iext -fPIC -shared $< -lcurl -o $@
 
 run: ext/bric.$(S)
 	@trap 'kill $$(jobs -p) 2>/dev/null; wait' EXIT INT TERM; \
