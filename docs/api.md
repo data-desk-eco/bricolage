@@ -1,20 +1,13 @@
 # API
 
-Loading the extension adds four functions, two tables and two views.
+Loading the extension adds three functions, two tables and two views.
 
 ## `job(source, target, brief, tools?)`
 
-Registers a job in `bric_job`: keys are rows of `source` (a table with a
-`key` column) that have no row in `target`. From then on, on any
-connection with the extension loaded, an insert into `source` forks a
-worker unless `BRIC_WORKERS` are already live. `job` itself forks one too,
-to pick up whatever is pending. Workers outlive the connection.
-
-## `drain(target, brief, source, tools?)`
-
-What the worker runs: `run` over each pending key, in the foreground,
-repeating until a pass makes no progress. A key that has failed `BRIC_TRIES`
-times is left alone.
+Registers a job in `bric_job`. From then on, on any connection with the
+extension loaded, each row inserted into `source` (a table with a `key`
+column) gets a worker, `sqlite3 db "select run(target, brief, key, tools)"`,
+that outlives the connection.
 
 ## `run(target, brief, key, tools?)`
 
@@ -29,8 +22,9 @@ up, and `NULL` when the attempt did not finish: the key was claimed by
 another worker, the tool server could not be reached, or the turn cap was
 hit. A key that already has a close row returns `'close'` without a model
 call, and an attempt silent for twice `BRIC_TIMEOUT` is treated as dead and
-retried, so a `SELECT run(...)` over the whole to-do list is safe to rerun. Only callable at the top level
-of a statement, not from views or triggers.
+retried, so a `SELECT run(...)` over the whole to-do list is safe to rerun.
+It waits for one of `BRIC_WORKERS` slots before starting a browser. Only
+callable at the top level of a statement, not from views or triggers.
 
 ## `squeeze(text)`
 
@@ -82,7 +76,6 @@ Everything is an environment variable, read when `run` is called:
 | `BRIC_TOOLS`        |                                          | MCP servers: a URL, a JSON array of URLs, or a JSON object of URL to allowed tool names; `run`'s fourth argument overrides it. Unset, `run` starts a browser per attempt |
 | `BRIC_BROWSER`      | `obscura mcp --http`                     | the browser command; `run` appends `--port N`     |
 | `BRIC_TURNS`        | `40`                                     | turns per attempt                                 |
-| `BRIC_WORKERS`      | `4`                                      | workers an insert will have live at once          |
-| `BRIC_TRIES`        | `3`                                      | errors before `drain` gives up on a key           |
+| `BRIC_WORKERS`      | `4`                                      | attempts live at once; `run` waits for a slot     |
 | `BRIC_SQLITE`       | `sqlite3`                                | the shell workers run in; must be able to `.load` |
 | `BRIC_TIMEOUT`      | `120`                                    | seconds per HTTP call; an attempt silent for twice this is dead |

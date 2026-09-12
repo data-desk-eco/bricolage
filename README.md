@@ -25,11 +25,17 @@ and registers the job, so that inserting a key is what starts an agent:
       "insert into company values ('Petroleum Development Oman')"
     sqlite3 research.db 'select * from company_parent; select * from bric_attempt'
 
-There is no daemon. An insert on a connection with the extension loaded
-forks a worker, which drains every pending key and exits; up to
-`BRIC_WORKERS` run at once. Keys inserted without the extension wait for
-the next connection that has it. Each attempt gets its own Obscura browser,
-or set `BRIC_TOOLS` to bring your own MCP server.
+There is no daemon. Each row inserted on a connection with the extension
+loaded gets a worker of its own, which outlives the connection; only
+`BRIC_WORKERS` run at once and the rest wait for a slot. Keys inserted
+without the extension start nothing. To start, or restart, work on every
+key that has no result, insert them again:
+
+    insert or replace into company
+    select * from company where key not in (select key from company_parent)
+
+Each attempt gets its own Obscura browser, or set `BRIC_TOOLS` to bring
+your own MCP server.
 
 Functions, tables, views and configuration are in [docs/api.md](docs/api.md).
 
