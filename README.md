@@ -46,9 +46,11 @@ Loading the extension adds four functions, one table and two views.
 Forks a worker to run every key in `source` (a table with a `key` column)
 that has no row in `target`, unless `BRIC_WORKERS` are already live, and
 returns its pid or `NULL`. Meant to be called from an `after insert`
-trigger on `source`, as `company.sql` does, but works at the top level too
-to pick up rows inserted while the extension was not loaded. The worker is
-a fresh `BRIC_SQLITE` process, so it outlives the connection that inserted.
+trigger on `source`, as `company.sql` does. Every worker drains the whole
+table, so one insert also picks up anything left pending by a crash; to
+kick that off without a new key, re-fire the trigger with
+`insert or replace into company select * from company`. The worker is a
+fresh `BRIC_SQLITE` process, so it outlives the connection that inserted.
 
 ### `drain(target, brief, source, tools?)`
 

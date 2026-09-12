@@ -35,10 +35,3 @@ begin
     'company'
   );
 end;
-
-select spawn(
-  'company_parent',
-  'Resolve each operator to its registered parent company. Cite the page you
-   read it on and quote it exactly.',
-  'company'
-);
