@@ -41,21 +41,16 @@ key that has no result, insert them again:
 
 ## Tools
 
-The model gets three kinds of tool:
-
-- **Web search** from the provider. The request includes Anthropic's
-  `web_search` server tool, which works on Anthropic's API and on DeepSeek's
-  Anthropic-format endpoint. Search results are for finding pages, not for
-  citing.
-- **A browser**, [Obscura](https://github.com/h4ckf0r0day/obscura), started
-  for each attempt on a free port and killed when the attempt ends. Every
-  page it returns is stored, squeezed, in `bric_log.text`. A result row
-  cites the receipt it quotes by `seq`, so a trigger like
-  `company_parent_cite` can reject a quote that is not on the page. Set
-  `BRIC_BROWSER` to run it differently.
-- **Anything over MCP.** Set `BRIC_TOOLS` to a server URL, a list of them,
-  or a map of URL to allowed tool names. These tools replace the browser
-  and their receipts are logged the same way.
+- **Web search** from the provider, via Anthropic's `web_search` server
+  tool. Works on Anthropic's API and DeepSeek's Anthropic-format endpoint.
+  For finding pages, not citing them.
+- **A browser**, [Obscura](https://github.com/h4ckf0r0day/obscura), one
+  per attempt. Every page it returns is stored in `bric_log.text`, and a
+  result row cites the page it quotes by `seq`, so a trigger like
+  `company_parent_cite` can reject a quote that is not on it.
+- **MCP.** Set `BRIC_TOOLS` to a server URL, a list, or a map of URL to
+  allowed tool names. These replace the browser; receipts are logged the
+  same way.
 
 Functions, tables, views and configuration are in [docs/api.md](docs/api.md).
 
