@@ -80,7 +80,8 @@ job's own set, relative to the worker's directory; NULL means no skills.
 The system prompt ends with an index, one line per skill from its
 frontmatter with the file's path, and the model reads a skill's body with
 `cat` when it needs it, so a skill is a receipt like a page. Each skill's
-`scripts/` is linked into the scratch directory's `bin`, so a script is a
+`scripts/` is copied into the scratch directory with the rest of the
+skill and linked into `bin`, so a script is a
 command and the model need never know where it lives. `skills/` here holds the ones the ch4id job uses. Update or delete the row to change or stop the
 job; the change applies to the next worker, not to workers already
 running.
@@ -158,13 +159,14 @@ its working directory; stdout and stderr merged into the receipt, and
 `[exit N]` appended when the status is not zero. The scratch directory is
 made under `TMPDIR` when the attempt opens and removed when it ends. It
 holds `bin/db` and a symlink to every skill script, so `PATH` starts with
-`bin`; `skills/<name>`, a symlink to each skill directory, which is the
+`bin`; `skills/<name>`, a copy of each skill directory, which is the
 path the system prompt's index gives; `.script`, the current call; and
 `.db`, a unix socket bric listens on for as long as the script runs. `db
 "sql"` (or `db` with the sql on stdin) posts it there with curl and
 prints csv with a header row, or the error and exit 22. The sql runs on
 the worker's own connection, with its busy timeout, so a sandbox needs
-nothing but the scratch directory writable. The environment is the
+nothing but the scratch directory writable and the system's tools
+readable; the home directory can be denied outright. The environment is the
 worker's minus every `BRIC_*` variable, so the API key is not in the
 sandbox, plus `BRIC_DB`, the socket's path. Output that begins with
 a PNG or JPEG header is sent to the model as an image, and stays in the

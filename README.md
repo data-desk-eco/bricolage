@@ -72,13 +72,14 @@ triggers to prune.
 
 Each `sh` call is one process: `$BRIC_SHELL <script>`, default `sh`, run
 in the attempt's scratch directory. That directory is the agent's whole
-world: `bin/` holds `db` and every skill script, `skills/` links each
+world: `bin/` holds `db` and every skill script, `skills/` is a copy of each
 skill, and `.db` is a unix socket bric serves while the script runs, so
 `db "select ..."` reaches the database through curl and nothing else has
 to be mounted. The database file, the API key and the worker's `BRIC_*`
 environment are never in the sandbox. `sandbox/` holds one executor a
 line long for each of the usual isolations; each takes the script path as
-its argument and needs write access to the scratch directory only:
+its argument and needs nothing outside the scratch directory but the system's own
+tools, so the home directory is out of reach:
 
     BRIC_SHELL=./sandbox/seatbelt      # macOS
     BRIC_SHELL=./sandbox/bwrap         # linux

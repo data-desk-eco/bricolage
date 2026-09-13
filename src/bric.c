@@ -453,6 +453,24 @@ static char **childenv(const char *dir)
 static const char db_script[] = "#!/bin/sh\n# db \"sql\" - run sql against the research database, csv with a header row; the argument or stdin\n"
     "exec curl -s --fail-with-body --unix-socket \"$BRIC_DB\" --data-binary \"${1:-@-}\" http://db/\n";
 
+static const char *cp_from, *cp_to;
+
+static int cp_cb(const char *p, const struct stat *st, int flag, struct FTW *f)
+{
+    (void)f;
+    char *to = sqlite3_mprintf("%s%s", cp_to, p + strlen(cp_from));
+    if (flag == FTW_D) mkdir(to, 0700);
+    else if (flag == FTW_F) {
+        int in = open(p, O_RDONLY), out = open(to, O_WRONLY | O_CREAT | O_TRUNC, st->st_mode & 0777);
+        char buf[65536];
+        for (ssize_t n; (n = read(in, buf, sizeof buf)) > 0 && write(out, buf, n) == n;);
+        close(in);
+        close(out);
+    }
+    sqlite3_free(to);
+    return 0;
+}
+
 static void scratch(const char *dir)
 {
     char *bin = sqlite3_mprintf("%s/bin", dir), *sk = sqlite3_mprintf("%s/skills", dir), *db = sqlite3_mprintf("%s/bin/db", dir);
@@ -469,8 +487,10 @@ static void scratch(const char *dir)
         for (size_t i = 0; i < g.gl_pathc; i++) {
             char real[PATH_MAX], *name = strrchr(g.gl_pathv[i], '/');
             if (!realpath(g.gl_pathv[i], real)) continue;
-            char *link = sqlite3_mprintf("%s/%s", sk, name ? name + 1 : g.gl_pathv[i]), *pat = sqlite3_mprintf("%s/scripts/*", real);
-            symlink(real, link);
+            char *copy = sqlite3_mprintf("%s/%s", sk, name ? name + 1 : g.gl_pathv[i]), *pat = sqlite3_mprintf("%s/scripts/*", copy);
+            cp_from = real;
+            cp_to = copy;
+            nftw(real, cp_cb, 16, FTW_PHYS);
             glob_t h = { 0 };
             if (!glob(pat, 0, NULL, &h))
                 for (size_t j = 0; j < h.gl_pathc; j++) {
@@ -479,7 +499,7 @@ static void scratch(const char *dir)
                     sqlite3_free(to);
                 }
             globfree(&h);
-            sqlite3_free(link);
+            sqlite3_free(copy);
             sqlite3_free(pat);
         }
     globfree(&g);

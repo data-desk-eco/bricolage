@@ -1,5 +1,3 @@
 #!/bin/sh
-# a container from $BRIC_IMAGE with the scratch directory mounted and each skill read-only where its symlink points
-script=$1; set --
-for s in "$PWD"/skills/*; do [ -L "$s" ] && set -- "$@" -v "$(readlink "$s")":"$(readlink "$s")":ro; done
-exec docker run --rm -i --init -v "$PWD":"$PWD" -w "$PWD" -e BRIC_DB -e PATH="$PWD/bin:/usr/local/bin:/usr/bin:/bin" "$@" "${BRIC_IMAGE:-tools}" sh "$script"
+# a container from $BRIC_IMAGE (default tools) with only the scratch directory mounted
+exec docker run --rm -i --init -v "$PWD":"$PWD" -w "$PWD" -e BRIC_DB -e PATH="$PWD/bin:/usr/local/bin:/usr/bin:/bin" "${BRIC_IMAGE:-tools}" sh "$1"

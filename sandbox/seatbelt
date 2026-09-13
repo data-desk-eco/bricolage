@@ -1,3 +1,3 @@
 #!/bin/sh
-# macos: read anywhere, write only the scratch directory, network open
-exec sandbox-exec -p "(version 1) (allow default) (deny file-write*) (allow file-write* (subpath \"$PWD\") (subpath \"/dev\"))" sh "$1"
+# macos: write only the scratch directory, read anything but the home directory beyond it, network open
+exec sandbox-exec -p "(version 1) (allow default) (deny file-write*) (deny file-read* (subpath \"$HOME\")) (allow file-read* file-write* (subpath \"$(pwd -P)\")) (allow file-write* (subpath \"/dev\"))" sh "$1"

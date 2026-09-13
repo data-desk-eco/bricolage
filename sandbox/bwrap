@@ -1,3 +1,4 @@
 #!/bin/sh
-# linux: the host read-only, the scratch directory writable, its own pid space
-exec bwrap --ro-bind / / --dev /dev --tmpfs /tmp --bind "$PWD" "$PWD" --unshare-pid --die-with-parent sh "$1"
+# linux: the system read-only, no home, the scratch directory writable, its own pid space
+exec bwrap --ro-bind /usr /usr --ro-bind /etc /etc --ro-bind /opt /opt --symlink usr/bin /bin --symlink usr/lib /lib --symlink usr/lib64 /lib64 \
+  --dev /dev --proc /proc --tmpfs /tmp --bind "$PWD" "$PWD" --unshare-all --share-net --die-with-parent sh "$1"
