@@ -14,7 +14,7 @@ def sh(id, script):
 
 def insert(id, table, **row):
     vals = ', '.join("'%s'" % v.replace("'", "''") if isinstance(v, str) else str(v) for v in row.values())
-    return sh(id, '%s "$BRIC_DB" <<\'EOF\'\ninsert into %s (%s) values (%s);\nEOF' % (SQLITE, table, ', '.join(row), vals))
+    return sh(id, 'db <<\'EOF\'\ninsert into %s (%s) values (%s);\nEOF' % (table, ', '.join(row), vals))
 
 
 class H(BaseHTTPRequestHandler):
@@ -42,7 +42,7 @@ class H(BaseHTTPRequestHandler):
                 content = [sh('b1', 'echo "X=$X"')]
             else:
                 assert last.endswith('] X=1'), last
-                content = [sh('b2', '%s "$BRIC_DB" "insert into bare values (\'%s\', cast(\'Globex\' as blob))"' % (SQLITE, key))]
+                content = [sh('b2', 'db "insert into bare values (\'%s\', cast(\'Globex\' as blob))"' % key)]
         elif key == 'plain':
             content = [{'type': 'text', 'text': 'no idea'}]
         elif key == 'bolt' and turn == 0 and not paused:
@@ -50,13 +50,13 @@ class H(BaseHTTPRequestHandler):
         elif turn == 0:
             content = [sh('c1', "cat <<'EOF'\n%s\nEOF" % PAGE),
                        sh('c2', "printf '%s'" % ''.join('\\%03o' % b for b in PNG)),
-                       sh('c3', 'echo "K=$BRIC_KEY|D=$BRIC_DB|P=$PWD"; printf \'\\377\\303\'; %s -readonly "$BRIC_DB" "select count(*) from bric_log where key = \'%s\' and kind = \'receipt\' and attempt = (select max(attempt) from bric_log where key = \'%s\')"; echo x > f; exit 3' % (SQLITE, key, key))]
+                       sh('c3', 'echo "K=$BRIC_KEY|D=$BRIC_DB|P=$PWD"; printf \'\\377\\303\'; db "select count(*) from bric_log where key = \'%s\' and kind = \'receipt\' and attempt = (select max(attempt) from bric_log where key = \'%s\')"; echo x > f; exit 3' % (key, key))]
         elif turn == 1:
             assert md, results
             images = [x['source'] for b in blocks if isinstance(b, list) for x in b[1:]]
             assert images == [{'type': 'base64', 'media_type': 'image/png', 'data': PNG64}], images
             assert results[-2].split('] ', 1)[1] == '[image/png, %d bytes]' % len(PNG), results[-2]
-            assert last.split('] ', 1)[1].startswith('K=|D=%s|P=' % os.path.abspath('test/out.db')), last
+            assert last.split('] ', 1)[1].startswith('K=|D='), last
             assert last.endswith('\n2\n[exit 3]'), last
             content = [sh('c4', 'cat f; sleep 5'), insert('c5', 'results', key=key, parent='Globex', confidence='certain', source=md, quote=quote)]
         elif turn == 2:

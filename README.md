@@ -45,7 +45,7 @@ key that has no result, insert them again:
 ## Tools
 
 An agent has a shell and web search. It runs scripts in the shell and
-queries the database with `sqlite3 "$BRIC_DB"`, which also gives it a
+queries the database with `db "select ..."`, which also gives it a
 full-text search over every page any agent has read. Prompting has three
 homes. What the harness needs of every agent, how to submit and what a
 receipt is, is in the tool description and never repeated. Who the agent
@@ -70,21 +70,23 @@ triggers to prune.
 
 ## Sandbox
 
-`BRIC_SHELL` is the command each script is piped into, default `sh`. The
-extension never learns what isolation is; you compose it from whatever
-speaks stdin and stdout:
+Each `sh` call is one process: `$BRIC_SHELL <script>`, default `sh`, run
+in the attempt's scratch directory. That directory is the agent's whole
+world: `bin/` holds `db` and every skill script, `skills/` links each
+skill, and `.db` is a unix socket bric serves while the script runs, so
+`db "select ..."` reaches the database through curl and nothing else has
+to be mounted. The database file, the API key and the worker's `BRIC_*`
+environment are never in the sandbox. `sandbox/` holds one executor a
+line long for each of the usual isolations; each takes the script path as
+its argument and needs write access to the scratch directory only:
 
-    BRIC_SHELL='sandbox-exec -f bric.sb sh'                    # macOS seatbelt
-    BRIC_SHELL='bwrap --ro-bind / / --tmpfs /tmp --bind . . --bind "$(dirname "$BRIC_DB")" "$(dirname "$BRIC_DB")" --unshare-pid --die-with-parent sh'
-    BRIC_SHELL='docker run --rm -i -v "$PWD":"$PWD" -w "$PWD" -v "$(dirname "$BRIC_DB")":"$(dirname "$BRIC_DB")" -e BRIC_DB tools sh'
+    BRIC_SHELL=./sandbox/seatbelt      # macOS
+    BRIC_SHELL=./sandbox/bwrap         # linux
+    BRIC_SHELL=./sandbox/docker        # any; BRIC_IMAGE names the image, default tools
 
-The command runs with the attempt's scratch directory as its working
-directory and `BRIC_DB` set to the database's path, so `$PWD` and
-`$BRIC_DB` in a Docker line mount both. The database's directory must be
-writable from inside, since the answer is an insert and WAL keeps its
-journal beside the file. A job can name its own sandbox in
-`bric_job.shell`, so a geospatial job runs in an image with GDAL while the
-rest use `sh`. Adding a tool is installing it where that shell can see it,
-and telling the model about it in the brief.
+A job can name its own executor in `bric_job.shell`, so a geospatial job
+runs in an image with GDAL while the rest use `sh`. Adding a tool is
+installing it where that executor can see it, and telling the model about
+it in the brief or a skill.
 
 Functions, tables, views and configuration are in [docs/api.md](docs/api.md).

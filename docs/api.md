@@ -10,7 +10,7 @@ Runs one research attempt for `key` and inserts the answer into `target`.
 `target` names a table you have created; its DDL, with any `CHECK`
 constraints and triggers, is the contract the model writes against and the
 one SQLite enforces. `brief` is the task in prose, shared by every key in
-the job. `shell` is the sandbox command, default `BRIC_SHELL`. The model
+the job. `shell` is the executor, default `BRIC_SHELL`. The model
 has `web_search` and `sh`, and answers by inserting its row with `sqlite3`;
 after every turn the worker checks `target` for a row with this `key`, and
 the first one it finds closes the attempt. See [Shell](#shell) for what
@@ -80,9 +80,8 @@ job's own set, relative to the worker's directory; NULL means no skills.
 The system prompt ends with an index, one line per skill from its
 frontmatter with the file's path, and the model reads a skill's body with
 `cat` when it needs it, so a skill is a receipt like a page. Each skill's
-`scripts/` is on the sandbox's `PATH`, so a script is a command and the
-model need never know where it lives; the sandbox must be able to read the
-directories. `skills/` here holds the ones the ch4id job uses. Update or delete the row to change or stop the
+`scripts/` is linked into the scratch directory's `bin`, so a script is a
+command and the model need never know where it lives. `skills/` here holds the ones the ch4id job uses. Update or delete the row to change or stop the
 job; the change applies to the next worker, not to workers already
 running.
 The database must be a file: on an in-memory database nothing is
@@ -115,7 +114,7 @@ FTS5 over `bric_log.text`, filled by trigger as receipts are stored.
 `select rowid, snippet(bric_page, 0, '', '', ' ... ', 48) from bric_page
 where bric_page match 'x'` finds every page any attempt has read, and the
 rowid is a `seq` a result row may cite. The model runs this through
-`sqlite3` in its shell; so can you. It is also the cite check: a result
+`db` in its shell; so can you. It is also the cite check: a result
 table's trigger asks whether the quote is a phrase on the cited receipt,
 
     where not exists (
@@ -153,27 +152,30 @@ or resumed. Images are not kept.
 
 ## Shell
 
-Each `sh` call is one process: `sh -c "cd <dir> && $BRIC_SHELL"` with the
-script on stdin, stdout and stderr merged into the receipt, and `[exit N]`
-appended when the status is not zero. `<dir>` is a scratch directory made
-for the attempt under `TMPDIR` and removed when it ends. The environment
-is the worker's minus every `BRIC_*` variable, so the API key is not in
-the sandbox, plus `BRIC_DB`, the database's path, with every skill's
-`scripts/` directory in front of `PATH`. The model reads and
-writes the database through `sqlite3 "$BRIC_DB"`, so the sandbox must be
-able to open that path for writing, journal files included. The `sqlite3`
-shell has no busy timeout, so a write that lands while a worker is logging
-fails with `database is locked`; that is a receipt like any other and the
-model retries, or the brief can suggest `-cmd '.timeout 10000'`. Output that begins with
+Each `sh` call is one process: `$BRIC_SHELL` split on whitespace, with
+the script's path appended, run with the attempt's scratch directory as
+its working directory; stdout and stderr merged into the receipt, and
+`[exit N]` appended when the status is not zero. The scratch directory is
+made under `TMPDIR` when the attempt opens and removed when it ends. It
+holds `bin/db` and a symlink to every skill script, so `PATH` starts with
+`bin`; `skills/<name>`, a symlink to each skill directory, which is the
+path the system prompt's index gives; `.script`, the current call; and
+`.db`, a unix socket bric listens on for as long as the script runs. `db
+"sql"` (or `db` with the sql on stdin) posts it there with curl and
+prints csv with a header row, or the error and exit 22. The sql runs on
+the worker's own connection, with its busy timeout, so a sandbox needs
+nothing but the scratch directory writable. The environment is the
+worker's minus every `BRIC_*` variable, so the API key is not in the
+sandbox, plus `BRIC_DB`, the socket's path. Output that begins with
 a PNG or JPEG header is sent to the model as an image, and stays in the
 conversation like any receipt: nothing sent is ever rewritten, so the
 prompt cache holds. Output with a NUL byte in it, or an image the cut below
 truncated, is reported by size only. After `BRIC_TIMEOUT` seconds, or 4
 MiB of output, the process group is killed and the receipt says so.
 Anything that escapes the process group, such as a container the client
-was detached from, is the sandbox command's to stop. Calls in one model
+was detached from, is the executor's to stop. Calls in one model
 turn run one after another, so files written by the first are there for
-the second.
+the second. `sandbox/` holds an executor for seatbelt, bwrap and docker.
 
 ## Configuration
 
@@ -185,7 +187,7 @@ Everything is an environment variable, read when `run` is called:
 | `BRIC_MODEL`        |                                          | model name; `bric_job.model` overrides it         |
 | `BRIC_PARAMS`       | `{}`                                     | JSON patched over every request body; `bric_job.params` overrides it |
 | `BRIC_URL`          | `https://api.anthropic.com/v1/messages`  | any Anthropic-format messages endpoint            |
-| `BRIC_SHELL`        | `sh`                                     | the sandbox: the command each script is piped into; `run`'s fourth argument and `bric_job.shell` override it |
+| `BRIC_SHELL`        | `sh`                                     | the executor each script's path is passed to; `run`'s fourth argument and `bric_job.shell` override it |
 | `BRIC_ATTEMPTS`     | `3`                                      | attempts per key before it stops being pending    |
 | `BRIC_TURNS`        | `40`                                     | turns per attempt; the last three carry a note telling the model to insert now |
 | `BRIC_WORKERS`      | `4`                                      | attempts live at once; `run` waits for a slot     |

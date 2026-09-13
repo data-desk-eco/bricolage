@@ -18,7 +18,16 @@ SQLITE_EXTENSION_INIT1
 #include <spawn.h>
 #include <time.h>
 #include <sys/wait.h>
+#include <sys/socket.h>
+#include <sys/un.h>
+#include <sys/stat.h>
+#include <limits.h>
 #include "sql.h"
+#if defined(__APPLE__) && __MAC_OS_X_VERSION_MAX_ALLOWED >= 260000 || defined(__GLIBC__) && (__GLIBC__ > 2 || __GLIBC_MINOR__ >= 41)
+#define addchdir posix_spawn_file_actions_addchdir
+#else
+#define addchdir posix_spawn_file_actions_addchdir_np
+#endif
 
 #define CAP (4 << 20)
 
@@ -187,18 +196,54 @@ static char *base64(const unsigned char *p, size_t n)
     return s;
 }
 
+static int csv(void *arg, int n, char **v, char **name)
+{
+    Buf *b = arg;
+    for (int pass = !b->n ? 0 : 1; pass < 2; pass++)
+        for (int i = 0; i < n; i++) {
+            const char *s = pass ? v[i] ? v[i] : "" : name[i];
+            char *f = strpbrk(s, ",\"\n\r") ? sqlite3_mprintf("%s\"%w\"%s", i ? "," : "", s, i + 1 < n ? "" : "\n")
+                                             : sqlite3_mprintf("%s%s%s", i ? "," : "", s, i + 1 < n ? "" : "\n");
+            on_body(f, 1, strlen(f), b);
+            sqlite3_free(f);
+        }
+    return 0;
+}
+
+static void serve(int c)
+{
+    Buf req = { sqlite3_mprintf(""), 0 }, res = { sqlite3_mprintf(""), 0 };
+    char chunk[65536], *body = NULL, *err = NULL;
+    long len = -1;
+    ssize_t n;
+    while ((!(body = strstr(req.out, "\r\n\r\n")) || (long)(req.n - (body + 4 - req.out)) < len) && (n = read(c, chunk, sizeof chunk)) > 0) {
+        on_body(chunk, 1, n, &req);
+        char *h = strstr(req.out, "Content-Length:");
+        if (h) len = atol(h + 15);
+    }
+    int rc = body ? sqlite3_exec(L, body + 4, csv, &res, &err) : SQLITE_ERROR;
+    char *head = sqlite3_mprintf("HTTP/1.0 %d OK\r\nContent-Type: text/csv\r\n\r\n%s%s", rc ? 500 : 200, err ? "error: " : "", err ? err : "");
+    for (const char *p = head, *e = p + strlen(p); p < e && (n = write(c, p, e - p)) > 0; p += n);
+    for (const char *p = res.out, *e = p + res.n; p < e && (n = write(c, p, e - p)) > 0; p += n);
+    sqlite3_free(head);
+    sqlite3_free(err);
+    sqlite3_free(req.out);
+    sqlite3_free(res.out);
+    close(c);
+}
+
 static char *shell(Attempt *a, const char *script, char **images)
 {
-    mkdir(a->dir, 0700);
-    char *path = sqlite3_mprintf("%s/bric.XXXXXX", env("TMPDIR", "/tmp"));
-    int fd = mkstemp(path), out[2];
+    char *path = sqlite3_mprintf("%s/.script", a->dir);
+    int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0600), out[2];
     if (fd < 0 || write(fd, script, strlen(script)) < 0 || close(fd) || pipe(out)) {
         sqlite3_free(path);
         return sqlite3_mprintf("error: %s", strerror(errno));
     }
     posix_spawn_file_actions_t fa;
     posix_spawn_file_actions_init(&fa);
-    posix_spawn_file_actions_addopen(&fa, 0, path, O_RDONLY, 0);
+    addchdir(&fa, a->dir);
+    posix_spawn_file_actions_addopen(&fa, 0, "/dev/null", O_RDONLY, 0);
     posix_spawn_file_actions_adddup2(&fa, out[1], 1);
     posix_spawn_file_actions_adddup2(&fa, out[1], 2);
     posix_spawn_file_actions_addclose(&fa, out[0]);
@@ -207,18 +252,30 @@ static char *shell(Attempt *a, const char *script, char **images)
 #ifdef POSIX_SPAWN_SETSID
     posix_spawnattr_setflags(&at, POSIX_SPAWN_SETSID);
 #endif
-    char *cmd = sqlite3_mprintf("cd '%q' && %s", a->dir, a->shell);
-    char *argv[] = { "sh", "-c", cmd, NULL };
+    char *cmd = sqlite3_mprintf("%s", a->shell), *argv[64], *w = cmd;
+    int n = 0;
+    while (n < 62 && (argv[n] = strsep(&w, " \t"))) if (*argv[n]) n++;
+    argv[n++] = path;
+    argv[n] = NULL;
+    struct sockaddr_un sa = { .sun_family = AF_UNIX };
+    snprintf(sa.sun_path, sizeof sa.sun_path, "%s/.db", a->dir);
+    unlink(sa.sun_path);
+    int sock = socket(AF_UNIX, SOCK_STREAM, 0);
+    if (bind(sock, (struct sockaddr *)&sa, sizeof sa) || listen(sock, 8)) {
+        close(sock);
+        sock = -1;
+    }
+    posix_spawn_file_actions_addclose(&fa, sock);
     pid_t pid = 0;
-    int rc = posix_spawnp(&pid, "sh", &fa, &at, argv, a->envp);
+    int rc = posix_spawnp(&pid, argv[0], &fa, &at, argv, a->envp);
     posix_spawn_file_actions_destroy(&fa);
     posix_spawnattr_destroy(&at);
     close(out[1]);
-    unlink(path);
     sqlite3_free(path);
     sqlite3_free(cmd);
     if (rc) {
         close(out[0]);
+        close(sock);
         return sqlite3_mprintf("error: %s", strerror(rc));
     }
     Buf b = { sqlite3_mprintf(""), 0 };
@@ -226,14 +283,19 @@ static char *shell(Attempt *a, const char *script, char **images)
     time_t start = time(NULL);
     const char *cut = NULL;
     for (;;) {
-        struct pollfd pf = { out[0], POLLIN, 0 };
+        struct pollfd pf[] = { { out[0], POLLIN, 0 }, { sock, POLLIN, 0 } };
         long left = limit - (time(NULL) - start);
         char chunk[65536];
-        int ready = left > 0 ? poll(&pf, 1, left * 1000) : 0;
+        int ready = left > 0 ? poll(pf, 2, left * 1000) : 0;
         if (ready < 0 && errno == EINTR) continue;
         if (ready <= 0) {
             cut = "killed after timeout";
             break;
+        }
+        if (pf[1].revents) {
+            int c = accept(sock, NULL, NULL);
+            if (c >= 0) serve(c);
+            if (!pf[0].revents) continue;
         }
         ssize_t n = read(out[0], chunk, sizeof chunk);
         if (n <= 0) break;
@@ -251,6 +313,7 @@ static char *shell(Attempt *a, const char *script, char **images)
 #endif
     }
     close(out[0]);
+    close(sock);
     int status = 0;
     waitpid(pid, &status, 0);
     int code = WIFEXITED(status) ? WEXITSTATUS(status) : WIFSIGNALED(status) ? 128 + WTERMSIG(status) : -1;
@@ -374,36 +437,62 @@ static void schema(void)
     sqlite3_exec(L, "alter table bric_job add column skills text", NULL, NULL, NULL);
 }
 
-static char **childenv(void)
+static char **childenv(const char *dir)
 {
     int n = 0, m = 0;
     while (environ[n]) n++;
     char **e = sqlite3_malloc((n + 3) * sizeof *e);
     for (int i = 0; i < n; i++)
         if (strncmp(environ[i], "BRIC_", 5) && strncmp(environ[i], "PATH=", 5)) e[m++] = environ[i];
-    char *path = sqlite3_mprintf("PATH="), *pat = sqlite3_mprintf("%s/scripts", env("BRIC_SKILLS", ""));
-    glob_t g = { 0 };
-    if (*env("BRIC_SKILLS", "") && !glob(pat, GLOB_BRACE, NULL, &g))
-        for (size_t i = 0; i < g.gl_pathc; i++) {
-            char *t = sqlite3_mprintf("%s%s:", path, g.gl_pathv[i]);
-            sqlite3_free(path);
-            path = t;
-        }
-    globfree(&g);
-    sqlite3_free(pat);
-    e[m++] = sqlite3_mprintf("%s%s", path, env("PATH", "/usr/bin:/bin"));
-    sqlite3_free(path);
-    e[m++] = sqlite3_mprintf("BRIC_DB=%s", file);
+    e[m++] = sqlite3_mprintf("PATH=%s/bin:%s", dir, env("PATH", "/usr/bin:/bin"));
+    e[m++] = sqlite3_mprintf("BRIC_DB=%s/.db", dir);
     e[m] = NULL;
     return e;
 }
 
-static char *skills(void)
+static const char db_script[] = "#!/bin/sh\n# db \"sql\" - run sql against the research database, csv with a header row; the argument or stdin\n"
+    "exec curl -s --fail-with-body --unix-socket \"$BRIC_DB\" --data-binary \"${1:-@-}\" http://db/\n";
+
+static void scratch(const char *dir)
 {
-    const char *dir = env("BRIC_SKILLS", "");
-    char *s = sqlite3_mprintf(""), *pat = sqlite3_mprintf("%s/SKILL.md", dir);
+    char *bin = sqlite3_mprintf("%s/bin", dir), *sk = sqlite3_mprintf("%s/skills", dir), *db = sqlite3_mprintf("%s/bin/db", dir);
+    mkdir(bin, 0700);
+    mkdir(sk, 0700);
+    FILE *f = fopen(db, "w");
+    if (f) {
+        fputs(db_script, f);
+        fclose(f);
+        chmod(db, 0700);
+    }
     glob_t g = { 0 };
-    if (*dir && !glob(pat, GLOB_BRACE, NULL, &g))
+    if (*env("BRIC_SKILLS", "") && !glob(env("BRIC_SKILLS", ""), GLOB_BRACE, NULL, &g))
+        for (size_t i = 0; i < g.gl_pathc; i++) {
+            char real[PATH_MAX], *name = strrchr(g.gl_pathv[i], '/');
+            if (!realpath(g.gl_pathv[i], real)) continue;
+            char *link = sqlite3_mprintf("%s/%s", sk, name ? name + 1 : g.gl_pathv[i]), *pat = sqlite3_mprintf("%s/scripts/*", real);
+            symlink(real, link);
+            glob_t h = { 0 };
+            if (!glob(pat, 0, NULL, &h))
+                for (size_t j = 0; j < h.gl_pathc; j++) {
+                    char *to = sqlite3_mprintf("%s/%s", bin, strrchr(h.gl_pathv[j], '/') + 1);
+                    symlink(h.gl_pathv[j], to);
+                    sqlite3_free(to);
+                }
+            globfree(&h);
+            sqlite3_free(link);
+            sqlite3_free(pat);
+        }
+    globfree(&g);
+    sqlite3_free(bin);
+    sqlite3_free(sk);
+    sqlite3_free(db);
+}
+
+static char *skills(const char *dir)
+{
+    char *s = sqlite3_mprintf(""), *pat = sqlite3_mprintf("%s/skills/*/SKILL.md", dir);
+    glob_t g = { 0 };
+    if (!glob(pat, 0, NULL, &g))
         for (size_t i = 0; i < g.gl_pathc; i++) {
             FILE *f = fopen(g.gl_pathv[i], "r");
             char line[4096], *name = NULL, *desc = NULL;
@@ -414,7 +503,7 @@ static char *skills(void)
             }
             if (f) fclose(f);
             if (name && desc) {
-                char *t = sqlite3_mprintf("%s\n- %s: %s (%s)", s, name, desc, g.gl_pathv[i]);
+                char *t = sqlite3_mprintf("%s\n- %s: %s (%s)", s, name, desc, g.gl_pathv[i] + strlen(dir) + 1);
                 sqlite3_free(s);
                 s = t;
             }
@@ -425,7 +514,7 @@ static char *skills(void)
     sqlite3_free(pat);
     if (*s) {
         char *t = sqlite3_mprintf("\n\nskills are what has already been worked out for this job."
-            " `cat` one before its first use; its scripts are on your path.%s", s);
+            " `cat` one before its first use, relative to the working directory; its scripts are on your path.%s", s);
         sqlite3_free(s);
         s = t;
     }
@@ -449,13 +538,24 @@ static char *attempt(const char *target, const char *brief, const char *key, con
     q(NULL, sql_dead, a.brief, a.key);
     a.attempt = q(NULL, sql_attempt, a.brief, a.key);
     char *closed = q(NULL, sql_closed, a.brief, a.key);
-    char *index = skills();
+    a.dir = sqlite3_mprintf("%s/bric.XXXXXX", env("TMPDIR", "/tmp"));
+    if (!mkdtemp(a.dir)) {
+        char *err = sqlite3_mprintf("%s: %s", a.dir, strerror(errno));
+        sqlite3_free(logrow(&a, "error", NULL, err, NULL));
+        sqlite3_free(err);
+        sqlite3_free(a.dir);
+        a.dir = NULL;
+    } else {
+        scratch(a.dir);
+        a.envp = childenv(a.dir);
+    }
+    char *index = skills(a.dir ? a.dir : "");
     char *system = sqlite3_mprintf("%s\n\n%s%s", a.brief, ddl, index);
     sqlite3_free(index);
     int rc = 1, taken = 0;
     char self[16];
     snprintf(self, sizeof self, "%d", getpid());
-    while (!closed && !taken) {
+    while (a.dir && !closed && !taken) {
         q(NULL, "begin immediate");
         q(NULL, sql_open, a.brief, a.key, a.attempt, system, env("BRIC_WORKERS", "4"), self, a.tools, a.shell, env("BRIC_MODEL", ""), env("BRIC_PARAMS", "{}"));
         char *opened = q(NULL, "select changes()");
@@ -468,17 +568,7 @@ static char *attempt(const char *target, const char *brief, const char *key, con
         sqlite3_free(t);
         if (!taken) sleep(1);
     }
-    if (!rc) {
-        a.dir = sqlite3_mprintf("%s/bric.XXXXXX", env("TMPDIR", "/tmp"));
-        if (!mkdtemp(a.dir)) {
-            char *err = sqlite3_mprintf("%s: %s", a.dir, strerror(errno));
-            sqlite3_free(logrow(&a, "error", NULL, err, NULL));
-            sqlite3_free(err);
-        } else {
-            a.envp = childenv();
-        }
-        rc = a.done || settled(&a);
-    }
+    if (!rc) rc = a.done || settled(&a);
     if (!rc) {
         char *quoted = q(NULL, sql_quote, a.key);
         char *messages = q(NULL, sql_message, "[]", "user", quoted);
