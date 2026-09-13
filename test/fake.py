@@ -141,10 +141,10 @@ def main():
 
     os.environ['BRIC_WORKERS'] = '1'
     r = sqlite(".load ./ext/bric",
-               "select job('company', 'results', 'Resolve each operator to its parent.') is null;",
+               "insert into bric_job (source, target, brief) values ('company', 'results', 'Resolve each operator to its parent.');",
                "begin; insert into company (key) values ('dyn'), ('dyn2'); commit;",
                "select count(*) from bric_log where key = 'dyn';")
-    assert r.stdout == '1\n0\n', (r.returncode, r.stdout, r.stderr)
+    assert r.stdout == '0\n', (r.returncode, r.stdout, r.stderr)
     for _ in range(100):
         time.sleep(0.2)
         r = sqlite("select key, parent from results where key like 'dyn%' order by key;")

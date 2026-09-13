@@ -1,3 +1,4 @@
+#define _GNU_SOURCE
 #include <sqlite3ext.h>
 SQLITE_EXTENSION_INIT1
 #include <curl/curl.h>
@@ -566,15 +567,6 @@ static void hook(void *arg, int op, const char *dbname, const char *table, sqlit
     sqlite3_finalize(s);
 }
 
-static void job(sqlite3_context *ctx, int argc, sqlite3_value **argv)
-{
-    const char *source = (const char *)sqlite3_value_text(argv[0]), *target = (const char *)sqlite3_value_text(argv[1]);
-    const char *brief = (const char *)sqlite3_value_text(argv[2]), *spec = argc > 3 ? (const char *)sqlite3_value_text(argv[3]) : NULL;
-    if (!file) return sqlite3_result_error(ctx, "job: database is not a file", -1);
-    schema();
-    q(NULL, sql_job_set, source, target, brief, spec);
-}
-
 int sqlite3_bric_init(sqlite3 *db, char **err, const sqlite3_api_routines *api)
 {
     SQLITE_EXTENSION_INIT2(api);
@@ -586,14 +578,13 @@ int sqlite3_bric_init(sqlite3 *db, char **err, const sqlite3_api_routines *api)
     if (file && sqlite3_open(file, &L) == SQLITE_OK) {
         sqlite3_busy_timeout(L, 30000);
         sqlite3_exec(L, "pragma journal_mode = wal", NULL, NULL, NULL);
+        schema();
+        sqlite3_update_hook(db, hook, NULL);
     }
     sqlite3_create_function(L, "alive", 1, SQLITE_UTF8, NULL, alive, NULL, NULL);
     sqlite3_create_function(L, "squeeze", 1, SQLITE_UTF8 | SQLITE_DETERMINISTIC, NULL, squeeze_fn, NULL, NULL);
     sqlite3_create_function(db, "squeeze", 1, SQLITE_UTF8 | SQLITE_DETERMINISTIC, NULL, squeeze_fn, NULL, NULL);
     sqlite3_create_function(db, "run", 3, SQLITE_UTF8 | SQLITE_DIRECTONLY, NULL, run, NULL, NULL);
     sqlite3_create_function(db, "run", 4, SQLITE_UTF8 | SQLITE_DIRECTONLY, NULL, run, NULL, NULL);
-    sqlite3_create_function(db, "job", 3, SQLITE_UTF8 | SQLITE_DIRECTONLY, NULL, job, NULL, NULL);
-    sqlite3_create_function(db, "job", 4, SQLITE_UTF8 | SQLITE_DIRECTONLY, NULL, job, NULL, NULL);
-    sqlite3_update_hook(db, hook, NULL);
     return SQLITE_OK;
 }

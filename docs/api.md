@@ -1,13 +1,8 @@
 # API
 
-Loading the extension adds four functions, three tables and two views.
-
-## `job(source, target, brief, tools?)`
-
-Registers a job in `bric_job`. From then on, on any connection with the
-extension loaded, each row inserted into `source` (a table with a `key`
-column) gets a worker, `sqlite3 db "select run(target, brief, key, tools)"`,
-that outlives the connection.
+Loading the extension adds three functions, three tables and two views.
+The tables are created on `.load`, so a script can insert into `bric_job`
+straight after loading.
 
 ## `run(target, brief, key, tools?)`
 
@@ -40,6 +35,23 @@ dead-attempt check and the worker slots.
 Collapses runs of whitespace to one space and strips base64 data URLs. Every
 receipt is stored squeezed, so apply it to a quote before matching it
 against `bric_log.text`, as the trigger in `company.sql` does.
+
+## `bric_job`
+
+One row per job: `source`, the to-do table (any table with a `key` column,
+and the primary key here), `target`, `brief` and an optional `tools` spec.
+Insert a row to register a job:
+
+    insert or replace into bric_job (source, target, brief)
+    values ('company', 'company_parent', 'Resolve each operator ...');
+
+From then on, on any connection with the extension loaded, each row
+inserted into `source` gets a worker, `sqlite3 db "select run(target,
+brief, key, tools)"`, that outlives the connection. `tools` NULL means
+`BRIC_TOOLS`. Update or delete the row to change or stop the job; the
+change applies to the next insert, not to workers already running.
+The database must be a file: on an in-memory database nothing is
+spawned.
 
 ## `bric_log`
 

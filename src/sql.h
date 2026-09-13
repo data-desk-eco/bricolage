@@ -50,9 +50,6 @@ static const char sql_insert[] =
 static const char sql_job[] =
     "select target, brief, coalesce(tools, ?2) from bric_job where source = ?1";
 
-static const char sql_job_set[] =
-    "insert or replace into bric_job (source, target, brief, tools) values (?1, ?2, ?3, ?4)";
-
 static const char sql_kind[] =
     "select kind from bric_log where job = ?1 and key = ?2 and attempt = ?3 and kind in ('close', 'error')";
 
