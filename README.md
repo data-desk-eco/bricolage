@@ -46,29 +46,30 @@ key that has no result, insert them again:
 
 The model has a shell and web search, and answers with a SQL insert.
 
-`sh` runs a script and returns what it printed. Every receipt is stored
-squeezed in `bric_log.text` with a `seq`, and a result row cites the
-receipt it quotes by that number, so a trigger like `company_parent_cite`
-can reject a quote that is not in it. The script is in the `call` row, so
-any receipt can be rerun. The working directory is a scratch directory
-kept for the attempt and deleted after it; stdout that is a PNG or JPEG
-is shown to the model as an image. From the shell, `obscura fetch URL
---dump markdown` is the browser and `sqlite3 "$BRIC_DB"` is this
-database: `bric_page` is a full-text search over every page any attempt
-has read, so the hundredth operator is resolved against the pages the
-first ninety-nine read, and finished result tables are there to query.
-
-The answer is the insert itself, against the DDL in the model's system
-prompt. A constraint or trigger failure is its receipt, and once a row
-for the key exists at the end of a turn the attempt is closed with that
-row as the record. There is no submit tool: SQLite is the contract and
-the transport. Web search comes from the provider via Anthropic's
-`web_search` server tool, for finding pages rather than citing them, and
-works on Anthropic's API and DeepSeek's Anthropic-format endpoint.
+- **`sh`** runs a script and returns what it printed. Every receipt is
+  stored squeezed in `bric_log.text` with a `seq`, and a result row cites
+  the receipt it quotes by that number, so a trigger like
+  `company_parent_cite` can reject a quote that is not in it. The script
+  is in the `call` row, so any receipt in the database can be rerun. The
+  working directory is a scratch directory kept for the attempt and deleted
+  after it; stdout that is a PNG or JPEG is shown to the model as an image.
+  From the shell, `obscura fetch URL --dump markdown` is the browser and
+  `sqlite3 "$BRIC_DB"` is this database: `bric_page` is a full-text
+  search over every page any attempt has read, so the hundredth operator
+  is resolved against the pages the first ninety-nine read, and finished
+  result tables are there to query.
+- **The answer is an insert.** The model writes its row into the result
+  table with `sqlite3`, against the DDL in its system prompt. A constraint
+  or trigger failure is its receipt. Once a row for the key exists at the
+  end of a turn, the attempt is closed with that row as the record. There
+  is no submit tool: SQLite is the contract and the transport.
+- **Web search** from the provider, via Anthropic's `web_search` server
+  tool. Works on Anthropic's API and DeepSeek's Anthropic-format endpoint.
+  For finding pages, not citing them.
 
 Because the model writes to the database, `bric_log` is append-only by
-trigger: neither an agent nor a slip of yours can edit or delete a
-receipt. Drop the two triggers to prune.
+trigger: neither an agent nor a slip of yours can edit or delete a receipt.
+Drop the two triggers to prune.
 
 ## Sandbox
 
