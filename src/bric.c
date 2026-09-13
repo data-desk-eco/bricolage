@@ -380,7 +380,7 @@ static char **childenv(void)
     while (environ[n]) n++;
     char **e = sqlite3_malloc((n + 3) * sizeof *e);
     for (int i = 0; i < n; i++)
-        if ((strncmp(environ[i], "BRIC_", 5) || !strncmp(environ[i], "BRIC_SKILLS=", 12)) && strncmp(environ[i], "PATH=", 5)) e[m++] = environ[i];
+        if (strncmp(environ[i], "BRIC_", 5) && strncmp(environ[i], "PATH=", 5)) e[m++] = environ[i];
     char *path = sqlite3_mprintf("PATH="), *pat = sqlite3_mprintf("%s/scripts", env("BRIC_SKILLS", ""));
     glob_t g = { 0 };
     if (*env("BRIC_SKILLS", "") && !glob(pat, GLOB_BRACE, NULL, &g))

@@ -76,7 +76,7 @@ NULL means `BRIC_PARAMS`. `skills` is a glob of skill directories in the
 [Agent Skills](https://agentskills.io) layout, each `<skill>/SKILL.md` with
 `name:` and `description:` frontmatter and whatever scripts and references
 sit beside it: `./skills/*` takes every skill, `./skills/{archive,web}` a
-job's own set, relative to the worker's directory; NULL means `BRIC_SKILLS`.
+job's own set, relative to the worker's directory; NULL means no skills.
 The system prompt ends with an index, one line per skill from its
 frontmatter with the file's path, and the model reads a skill's body with
 `cat` when it needs it, so a skill is a receipt like a page. Each skill's
@@ -158,8 +158,8 @@ script on stdin, stdout and stderr merged into the receipt, and `[exit N]`
 appended when the status is not zero. `<dir>` is a scratch directory made
 for the attempt under `TMPDIR` and removed when it ends. The environment
 is the worker's minus every `BRIC_*` variable, so the API key is not in
-the sandbox, plus `BRIC_DB`, the database's path, and `BRIC_SKILLS`, with every
-skill's `scripts/` directory in front of `PATH`. The model reads and
+the sandbox, plus `BRIC_DB`, the database's path, with every skill's
+`scripts/` directory in front of `PATH`. The model reads and
 writes the database through `sqlite3 "$BRIC_DB"`, so the sandbox must be
 able to open that path for writing, journal files included. The `sqlite3`
 shell has no busy timeout, so a write that lands while a worker is logging
@@ -185,7 +185,6 @@ Everything is an environment variable, read when `run` is called:
 | `BRIC_MODEL`        |                                          | model name; `bric_job.model` overrides it         |
 | `BRIC_PARAMS`       | `{}`                                     | JSON patched over every request body; `bric_job.params` overrides it |
 | `BRIC_URL`          | `https://api.anthropic.com/v1/messages`  | any Anthropic-format messages endpoint            |
-| `BRIC_SKILLS`       |                                          | a glob of skill directories; `bric_job.skills` overrides it |
 | `BRIC_SHELL`        | `sh`                                     | the sandbox: the command each script is piped into; `run`'s fourth argument and `bric_job.shell` override it |
 | `BRIC_ATTEMPTS`     | `3`                                      | attempts per key before it stops being pending    |
 | `BRIC_TURNS`        | `40`                                     | turns per attempt; the last three carry a note telling the model to insert now |

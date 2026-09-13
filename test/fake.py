@@ -104,7 +104,7 @@ def main():
     server = ThreadingHTTPServer(('127.0.0.1', 0), H)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     base = 'http://127.0.0.1:%d' % server.server_port
-    os.environ.update(SQLITE=SQLITE, BRIC_SQLITE=SQLITE, BRIC_URL=base + '/v1/messages', BRIC_MODEL='fake', BRIC_KEY='secret', BRIC_TIMEOUT='2', BRIC_SKILLS=os.path.abspath('test/skills') + '/*')
+    os.environ.update(SQLITE=SQLITE, BRIC_SQLITE=SQLITE, BRIC_URL=base + '/v1/messages', BRIC_MODEL='fake', BRIC_KEY='secret', BRIC_TIMEOUT='2')
     for f in ['test/out.db', 'test/out.db-wal', 'test/out.db-shm']:
         if os.path.exists(f):
             os.remove(f)
@@ -136,8 +136,6 @@ def main():
     assert r.stdout == '1|[image/png, %d bytes]\n' % len(PNG), r.stdout
     r = sqlite("select detail ->> 'command' from bric_log where key = 'acme' and kind = 'call' and tool = 'sh' order by seq limit 1 offset 3;")
     assert r.stdout == 'cat f; sleep 5\n', r.stdout
-    r = sqlite("select detail ->> 'system' like '%skills are what has already been worked out%- echo: says hello (%/echo/SKILL.md)' from bric_log where key = 'acme' and kind = 'open';")
-    assert r.stdout == '1\n', r.stdout
     r = sqlite("select detail ->> 'parent', detail ->> 'key' from bric_log where key = 'acme' and kind = 'close';")
     assert r.stdout == 'Globex|acme\n', r.stdout
     r = sqlite("update bric_log set text = 'forged' where key = 'acme' and kind = 'receipt';")
@@ -165,7 +163,7 @@ def main():
 
     os.environ['BRIC_WORKERS'] = '1'
     r = sqlite(".load ./ext/bric",
-               "insert into bric_job (source, target, brief, model, params) values ('company', 'results', 'Resolve each operator to its parent.', 'cheap', '{\"thinking\": {\"type\": \"disabled\"}}');",
+               "insert into bric_job (source, target, brief, model, params, skills) values ('company', 'results', 'Resolve each operator to its parent.', 'cheap', '{\"thinking\": {\"type\": \"disabled\"}}', 'test/skills/*');",
                "begin; insert into company (key) values ('undo'); rollback;",
                "begin; insert into company (key) values ('dyn'), ('dyn2');", ".system sleep 1", "commit;",
                "select count(*) from bric_log where key = 'dyn';")
@@ -181,6 +179,8 @@ def main():
     assert {(c['model'], c.get('thinking', {}).get('type')) for c in H.calls if c['messages'][0]['content'].startswith('dyn')} == {('cheap', 'disabled')}, H.calls[-1]
     r = sqlite("select detail ->> 'model', detail -> 'params' from bric_log where key = 'dyn' and kind = 'open';")
     assert r.stdout == 'cheap|{"thinking":{"type":"disabled"}}\n', r.stdout
+    r = sqlite("select detail ->> 'system' like '%skills are what has already been worked out%- echo: says hello (%/echo/SKILL.md)' from bric_log where key = 'dyn' and kind = 'open';")
+    assert r.stdout == '1\n', r.stdout
 
     def wait(sql, want):
         for _ in range(100):
