@@ -24,7 +24,8 @@ not Apple's.
 
 `company.sql` resolves operators to their parent companies. Loading it
 creates the `company` to-do table and the `company_parent` result table,
-and registers the job, so that inserting a key is what starts an agent:
+and inserts the job into `bric_job`, so that inserting a key is what
+starts an agent:
 
     sqlite3 research.db < company.sql
     sqlite3 research.db -cmd '.load ./ext/bric' \

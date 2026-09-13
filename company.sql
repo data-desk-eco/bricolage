@@ -25,7 +25,7 @@ begin
   );
 end;
 
-select job(
+insert or replace into bric_job (source, target, brief) values (
   'company',
   'company_parent',
   'Resolve each operator to its registered parent company. Cite the page you
