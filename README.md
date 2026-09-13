@@ -44,32 +44,21 @@ key that has no result, insert them again:
 
 ## Tools
 
-The model has a shell and web search, and answers with a SQL insert.
+An agent has a shell, a browser and web search. It runs scripts in the
+shell, reads pages with `obscura fetch URL --dump markdown`, and queries
+the database with `sqlite3 "$BRIC_DB"`, which also gives it a full-text
+search over every page any agent has read. Web search finds pages; the
+pages themselves are what get quoted.
 
-- **`sh`** runs a script and returns what it printed. Every receipt is
-  stored squeezed in `bric_log.text` with a `seq`, and a result row cites
-  the receipt it quotes by that number, so a trigger like
-  `company_parent_cite` can reject a quote that is not in it. The script
-  is in the `call` row, so any receipt in the database can be rerun. The
-  working directory is a scratch directory kept for the attempt and deleted
-  after it; stdout that is a PNG or JPEG is shown to the model as an image.
-  From the shell, `obscura fetch URL --dump markdown` is the browser and
-  `sqlite3 "$BRIC_DB"` is this database: `bric_page` is a full-text
-  search over every page any attempt has read, so the hundredth operator
-  is resolved against the pages the first ninety-nine read, and finished
-  result tables are there to query.
-- **The answer is an insert.** The model writes its row into the result
-  table with `sqlite3`, against the DDL in its system prompt. A constraint
-  or trigger failure is its receipt. Once a row for the key exists at the
-  end of a turn, the attempt is closed with that row as the record. There
-  is no submit tool: SQLite is the contract and the transport.
-- **Web search** from the provider, via Anthropic's `web_search` server
-  tool. Works on Anthropic's API and DeepSeek's Anthropic-format endpoint.
-  For finding pages, not citing them.
+An agent answers by inserting its row into the result table, so a
+constraint or trigger your schema carries is the answer's receipt. There
+is no submit step and no separate API: SQLite is the contract.
 
-Because the model writes to the database, `bric_log` is append-only by
-trigger: neither an agent nor a slip of yours can edit or delete a receipt.
-Drop the two triggers to prune.
+Every script and page is a receipt in `bric_log`, numbered and kept with
+the script that produced it, so any result can be traced back to, and
+rerun from, what the agent read. Receipts are append-only by trigger:
+neither an agent nor a slip of yours can edit or delete one. Drop the two
+triggers to prune.
 
 ## Sandbox
 
