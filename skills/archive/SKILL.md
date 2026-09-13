@@ -34,6 +34,26 @@ Examples:
     q "select id, kind, name, operator, round(km, 2) as km from near(38.49, 54.21, 5) order by km limit 20"
     q "select id, source_label, operator, confidence from attributions() where lat between 38.4 and 38.6 and lon between 54.1 and 54.3"
 
+## what a plume's coordinate means
+
+It depends on the sensor, and `sat` says which.
+
+- TROPOMI (`imeo` and `sron`, most rows) is coarse: a pixel is about 5.5 by
+  7 km and the source is commonly 2 to 10 km from the coordinate, usually
+  upwind. The coordinate is a search area, not a place.
+- Carbon Mapper is precise. Aircraft (Global Airborne Observatory, AVIRIS-NG,
+  AVIRIS-3) is good to tens of metres; satellite (Tanager, ISS) to a few
+  hundred. `imeo` high-resolution records are good to about a kilometre.
+- Sentinel-2 (`S2`, `S2A`, `S2B`, `S2C`) is precise to a few hundred metres.
+
+Do not move a precise position upwind: wind explains the plume's shape, not
+a different origin. For a precise sensor, unmapped equipment standing at the
+coordinate beats a named facility kilometres away; for a coarse one, search
+the whole plausible radius and weight the upwind side. `sec` is the sector
+the provider assigned, and a `waste` plume is very rarely a gas well. A
+cluster of detections at one position over months is strong evidence of a
+persistent source, and one no single page will state.
+
 The per-provider records under `carbon-mapper/plumes`, `imeo/plumes`,
 `sron/plumes` and `data-desk/plumes` are the raw feeds, one file a year as
 `bucket('imeo/plumes/year=2025/data.parquet')`. Name the year: the bucket

@@ -44,15 +44,19 @@ key that has no result, insert them again:
 
 ## Tools
 
-An agent has a shell, a browser and web search. It runs scripts in the
-shell, reads pages with `obscura fetch URL --dump markdown`, and queries
-the database with `sqlite3 "$BRIC_DB"`, which also gives it a full-text
-search over every page any agent has read. Web search finds pages; the
-pages themselves are what get quoted. What a job has already worked out,
-how to query some archive or frame a picture, goes in a skills directory
-(`bric_job.skills`, the [Agent Skills](https://agentskills.io) layout):
-the model gets an index and reads a skill, and runs its scripts, when it
-needs to.
+An agent has a shell and web search. It runs scripts in the shell and
+queries the database with `sqlite3 "$BRIC_DB"`, which also gives it a
+full-text search over every page any agent has read. Prompting has three
+homes. What the harness needs of every agent, how to submit and what a
+receipt is, is in the tool description and never repeated. Who the agent
+is and what one row of the job means is the brief, the system prompt, kept
+as short as the schema it sits beside. Anything done in the shell, how to
+read a page, query some archive or frame a picture, is a skill in the
+[Agent Skills](https://agentskills.io) layout, generic enough to share
+between jobs; `bric_job.skills` is a glob of the skill directories a job
+uses, `./skills/{archive,web}`, and the model gets an index and reads a
+skill, and runs its scripts, when it needs to. `skills/web` wraps the
+[Obscura](https://github.com/h4ckf0r0day/obscura) browser as `page URL`.
 
 An agent answers by inserting its row into the result table, so a
 constraint or trigger your schema carries is the answer's receipt. There

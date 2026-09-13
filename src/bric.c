@@ -381,9 +381,9 @@ static char **childenv(void)
     char **e = sqlite3_malloc((n + 3) * sizeof *e);
     for (int i = 0; i < n; i++)
         if ((strncmp(environ[i], "BRIC_", 5) || !strncmp(environ[i], "BRIC_SKILLS=", 12)) && strncmp(environ[i], "PATH=", 5)) e[m++] = environ[i];
-    char *path = sqlite3_mprintf("PATH="), *pat = sqlite3_mprintf("%s/*/scripts", env("BRIC_SKILLS", ""));
+    char *path = sqlite3_mprintf("PATH="), *pat = sqlite3_mprintf("%s/scripts", env("BRIC_SKILLS", ""));
     glob_t g = { 0 };
-    if (*env("BRIC_SKILLS", "") && !glob(pat, 0, NULL, &g))
+    if (*env("BRIC_SKILLS", "") && !glob(pat, GLOB_BRACE, NULL, &g))
         for (size_t i = 0; i < g.gl_pathc; i++) {
             char *t = sqlite3_mprintf("%s%s:", path, g.gl_pathv[i]);
             sqlite3_free(path);
@@ -401,9 +401,9 @@ static char **childenv(void)
 static char *skills(void)
 {
     const char *dir = env("BRIC_SKILLS", "");
-    char *s = sqlite3_mprintf(""), *pat = sqlite3_mprintf("%s/*/SKILL.md", dir);
+    char *s = sqlite3_mprintf(""), *pat = sqlite3_mprintf("%s/SKILL.md", dir);
     glob_t g = { 0 };
-    if (*dir && !glob(pat, 0, NULL, &g))
+    if (*dir && !glob(pat, GLOB_BRACE, NULL, &g))
         for (size_t i = 0; i < g.gl_pathc; i++) {
             FILE *f = fopen(g.gl_pathv[i], "r");
             char line[4096], *name = NULL, *desc = NULL;
@@ -414,7 +414,7 @@ static char *skills(void)
             }
             if (f) fclose(f);
             if (name && desc) {
-                char *t = sqlite3_mprintf("%s\n- %s: %s", s, name, desc);
+                char *t = sqlite3_mprintf("%s\n- %s: %s (%s)", s, name, desc, g.gl_pathv[i]);
                 sqlite3_free(s);
                 s = t;
             }
@@ -425,8 +425,7 @@ static char *skills(void)
     sqlite3_free(pat);
     if (*s) {
         char *t = sqlite3_mprintf("\n\nskills are what has already been worked out for this job."
-            " read one with `cat \"$BRIC_SKILLS/<name>/SKILL.md\"` before its first use; its scripts are on your path."
-            " stay in the directory you start in.%s", s);
+            " `cat` one before its first use; its scripts are on your path.%s", s);
         sqlite3_free(s);
         s = t;
     }

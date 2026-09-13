@@ -72,16 +72,17 @@ database. `params` is a JSON object patched over the request body
 (`json_patch`), for whatever the endpoint takes beyond the model name:
 `'{"thinking": {"type": "disabled"}}'` for deepseek,
 `'{"output_config": {"effort": "low"}}'` or a `max_tokens` for Anthropic.
-NULL means `BRIC_PARAMS`. `skills` is a directory of skills in the
-[Agent Skills](https://agentskills.io) layout, `<dir>/<name>/SKILL.md` with
+NULL means `BRIC_PARAMS`. `skills` is a glob of skill directories in the
+[Agent Skills](https://agentskills.io) layout, each `<skill>/SKILL.md` with
 `name:` and `description:` frontmatter and whatever scripts and references
-sit beside it; NULL means `BRIC_SKILLS`. The system prompt ends with an
-index, one line per skill from its frontmatter, and the model reads a
-skill's body with `cat` when it needs it, so a skill is a receipt like a
-page. Each skill's `scripts/` is on the sandbox's `PATH`, so a script is a
-command and the model need never know where it lives; the sandbox must be
-able to read the directory; `skills/` here holds the
-ones the ch4id job uses. Update or delete the row to change or stop the
+sit beside it: `./skills/*` takes every skill, `./skills/{archive,web}` a
+job's own set, relative to the worker's directory; NULL means `BRIC_SKILLS`.
+The system prompt ends with an index, one line per skill from its
+frontmatter with the file's path, and the model reads a skill's body with
+`cat` when it needs it, so a skill is a receipt like a page. Each skill's
+`scripts/` is on the sandbox's `PATH`, so a script is a command and the
+model need never know where it lives; the sandbox must be able to read the
+directories. `skills/` here holds the ones the ch4id job uses. Update or delete the row to change or stop the
 job; the change applies to the next worker, not to workers already
 running.
 The database must be a file: on an in-memory database nothing is
@@ -184,7 +185,7 @@ Everything is an environment variable, read when `run` is called:
 | `BRIC_MODEL`        |                                          | model name; `bric_job.model` overrides it         |
 | `BRIC_PARAMS`       | `{}`                                     | JSON patched over every request body; `bric_job.params` overrides it |
 | `BRIC_URL`          | `https://api.anthropic.com/v1/messages`  | any Anthropic-format messages endpoint            |
-| `BRIC_SKILLS`       |                                          | a directory of skills; `bric_job.skills` overrides it |
+| `BRIC_SKILLS`       |                                          | a glob of skill directories; `bric_job.skills` overrides it |
 | `BRIC_SHELL`        | `sh`                                     | the sandbox: the command each script is piped into; `run`'s fourth argument and `bric_job.shell` override it |
 | `BRIC_ATTEMPTS`     | `3`                                      | attempts per key before it stops being pending    |
 | `BRIC_TURNS`        | `40`                                     | turns per attempt; the last three carry a note telling the model to insert now |
