@@ -1,10 +1,11 @@
 # Bricolage
 
 Bricolage is a SQLite extension for building datasets using LLM research
-agents. Inserting rows into a to-do table spawns parallel agents equipped
-with web search, the [Obscura](https://github.com/h4ckf0r0day/obscura)
-browser and tools over MCP. Each agent writes to a typed result table with
-validation and all operations are logged in the database.
+agents. Inserting rows into a to-do table spawns parallel agents, each
+with web search and a shell: the [Obscura](https://github.com/h4ckf0r0day/obscura)
+browser, the database itself and whatever else is installed in the sandbox
+you name. Each agent writes to a typed result table with validation and
+all operations are logged in the database.
 
 Use Bricolage to enrich existing datasets (e.g. take a list of LNG terminal
 names, find their operators) or to perform repeated research tasks with a
@@ -18,7 +19,8 @@ full audit chain.
 Needs a C compiler, libcurl and the SQLite headers. The shell that runs
 your script must be able to `.load`: on macOS that is Homebrew's
 (`brew install sqlite`; the Makefile finds it at /opt/homebrew/opt/sqlite),
-not Apple's.
+not Apple's. Agents need `sh`, and use `obscura` and `sqlite3` when they
+are on the path of the shell you give them.
 
 ## Quick start
 
@@ -42,19 +44,41 @@ key that has no result, insert them again:
 
 ## Tools
 
+The model has three tools, and one of them is a shell.
+
+- **`sh`** runs a script and returns what it printed. Every receipt is
+  stored squeezed in `bric_log.text` with a `seq`, and a result row cites
+  the receipt it quotes by that number, so a trigger like
+  `company_parent_cite` can reject a quote that is not in it. The script
+  is in the `call` row, so any receipt in the database can be rerun. The
+  working directory is a scratch directory kept for the attempt and deleted
+  after it; stdout that is a PNG or JPEG is shown to the model as an image.
+  From the shell, `obscura fetch URL --dump markdown` is the browser and
+  `sqlite3 -readonly "$BRIC_DB"` is this database: `bric_page` is a
+  full-text search over every page any attempt has read, so the hundredth
+  operator is resolved against the pages the first ninety-nine read, and
+  finished result tables are there to query.
+- **`submit`** inserts the row for the key, typed from the target table's
+  DDL. A constraint or trigger failure is the receipt.
 - **Web search** from the provider, via Anthropic's `web_search` server
   tool. Works on Anthropic's API and DeepSeek's Anthropic-format endpoint.
   For finding pages, not citing them.
-- **A browser**, [Obscura](https://github.com/h4ckf0r0day/obscura), one
-  per attempt. Every page it returns is stored in `bric_log.text`, and a
-  result row cites the page it quotes by `seq`, so a trigger like
-  `company_parent_cite` can reject a quote that is not on it.
-- **Every page read so far.** `pages` is a full-text search over the
-  receipts of every attempt in the database, so the hundredth operator is
-  resolved against the pages the first ninety-nine read.
-- **MCP.** The browser is one MCP server; `BRIC_TOOLS` names the others
-  as a URL, a list, or a map of URL to allowed tool names, with `browser`
-  as the entry for the browser. Receipts are logged the same way.
+
+## Sandbox
+
+`BRIC_SHELL` is the command each script is piped into, default `sh`. The
+extension never learns what isolation is; you compose it from whatever
+speaks stdin and stdout:
+
+    BRIC_SHELL='sandbox-exec -f bric.sb sh'                    # macOS seatbelt
+    BRIC_SHELL='bwrap --ro-bind / / --tmpfs /tmp --bind . /work --chdir /work --unshare-pid --die-with-parent sh'
+    BRIC_SHELL='docker run --rm -i -v "$PWD":/work -w /work -v /srv/data:/data:ro tools sh'
+    BRIC_SHELL='ssh jail sh'
+
+The command runs with the attempt's scratch directory as its working
+directory, so `$PWD` in a Docker line mounts it. A job can name its own
+sandbox in `bric_job.shell`, so a geospatial job runs in an image with GDAL
+while the rest use `sh`. Adding a tool is installing it where that shell
+can see it, and telling the model about it in the brief.
 
 Functions, tables, views and configuration are in [docs/api.md](docs/api.md).
-
