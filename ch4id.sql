@@ -66,114 +66,13 @@ says who detected it: a Carbon Mapper id looks like
 `tan20250101t113529c00s4001-A`, an IMEO id is a bare uuid, an SRON id is
 `sron_20230304_32.20N_93.35W`, a Data Desk id starts `DD:`. Read your row first.
 
-## The archive
+## Working
 
-DuckDB is on the path and the archive is public object storage. Read it
-straight off the bucket: there is nothing to download and no credentials.
-
-```sh
-duckdb -csv archive.db "
-install httpfs; load httpfs; install spatial; load spatial;
-create or replace macro bucket(p) as
-    ''https://s3.WAW3-2.cloudferro.com/data-desk-archive/'' || p;
-select * from read_parquet(bucket(''views/plumes/data.parquet'')) limit 5"
-```
-
-`archive.db` in the working directory keeps the macro and the loaded
-extensions between calls, so later calls are just `duckdb -csv archive.db
-"select ..."`. Always `-csv` or `-json`: the default table output is boxes and
-colour codes that waste your context. Work in the directory you start in;
-it is yours and is cleared when you finish.
-
-Four tables answer almost everything:
-
-- `views/plumes/data.parquet` is every plume the archive holds, 70,679 rows:
-  `id`, `src` (cm, imeo, sron, dd), `lat`, `lon`, `dt`, `rate` in kg/hr, `unc`,
-  `sat`, `sec`, `link`, `overlay`, `bounds`. This is where your record is.
-- `views/features/data.parquet` is 14,976,918 mapped features: `id`, `dataset`
-  (ogim, osm, gem, mapstand), `kind` (snake case, 228 kinds), `name`,
-  `operator`, `status`, `fuel`, `lat`, `lon`, `geometry`.
-- `views/detections/data.parquet` is 1,379,760 Sentinel-2 satellite detections,
-  partitioned by MGRS tile under `views/detections/mgrs=*/data.parquet`.
-- `views/attributions/data.parquet` is 1,948 published attributions in this very
-  shape: `id`, `source_label`, `source_kind`, `source_name`, `operator`,
-  `attributed_ids`, `lat`, `lon`, `confidence`, `paragraph`, `evidence`,
-  `model`, `run_at`, `verified`.
-
-Anything under `views/` is the archive''s considered output and is the thing to
-use. The per-provider records underneath it (`carbon-mapper/plumes`,
-`imeo/plumes`, `sron/plumes`, `data-desk/plumes`, one file per year as
-`imeo/plumes/year=2025/data.parquet`) are the raw feeds, useful when you want a
-source''s own fields rather than the archive''s flattened view. Name the year:
-the bucket does not answer a `year=*` glob.
-
-Two rules about size. The features table is 15 million rows spread over four
-datasets: filter by bounding box *before* you measure distance, or a query reads
-every row and takes minutes. A scan of `views/plumes` is not free either: scope
-it by date or by the key.
-
-DuckDB keeps a session only if you keep it. One `duckdb -c` is one process, so
-either repeat the setup above in each call or run `duckdb` with its own database
-file in your scratch directory and define the views and macros there once, then
-reuse them.
-
-Read `views/attributions/data.parquet` before you answer. Earlier attempts have
-attributed 1,948 of these plumes, and a record near yours in place, date or
-operator is the best single piece of evidence you will get.
-
-## The ground
-
-The archive says where a thing is mapped. It does not say whether the pad was
-ever drilled, whether the tanks were built, whether the site was demolished, or
-which of two neighbours the plume sits on. A picture does. Get one with `curl`
-and display it by writing the bytes to stdout:
-
-```sh
-curl -sS -o a.png "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/export?bbox=39.32,53.78,39.40,53.83&bboxSR=4326&imageSR=4326&size=1200,1200&format=jpg&f=image"
-cat a.png
-```
-
-That is a 1200-pixel square of satellite imagery with north up. The picture is
-shown to you only when it is the whole of the output, so `cat` it on its own,
-not after an `ls`. A jpeg at 1200 pixels is a few hundred kilobytes; a png at
-2000 is megabytes and may be cut before it reaches you. Each picture is
-shown to you once, when it is fresh: look properly, and say what you see
-before you move on. Vary the bbox to
-frame what you want: four decimals is about 11 metres, and the square is on the
-ground when the width in degrees is the height times the cosine of the latitude.
-The `size` caps at 4096; you never need more than 1500. Everything in the archive is public, so `curl` with no
-credentials is also how you read a `link` or an `overlay` path.
-
-**Treat the scratch directory as a small one.** Downloading the archive''s
-big files fills the disk, and the whole attempt then fails: one attempt pulled
-a 1.3 GB tile and lost every file it had written. Never download a bulk file,
-an archive or a whole parquet partition to look at it. Ask DuckDB for the rows
-and the columns you want and let it fetch only those; if a query returns more
-than a few hundred rows, it is answering too broad a question and you should
-filter it, not download it.
-
-One or two downloads are enough to answer with. Start one clear wide frame —
-the whole search radius, so you can see what stands around the plume — and, if
-the source is still open, one close frame on the candidate at a kilometre or
-two across. Two or three images per record. Do not walk a grid of frames, do
-not re-shoot the same ground at slightly different sizes, and do not render
-imagery you already decided was uninformative.
-
-Carbon Mapper publishes its own retrieval for its records: the plume drawn over
-the scene, and the scene alone. The signed URLs expire within the hour, so ask
-for them now rather than storing them:
-
-```sh
-curl -sS "https://api.carbonmapper.org/api/v1/catalog/plumes/annotated?plume_names=tan20250101t113529c00s4001-A" | duckdb -c "
-select plume_png, rgb_png, plume_bounds from read_json_auto(''/dev/stdin'')"
-```
-
-Then `curl -o p.png URL` and `cat p.png`. Not every Carbon Mapper record has a
-retrieval, so ask and see. The plume mask is the evidence; the imagery is what
-it fell on.
-
-Say what you saw in `paragraph`. A picture you did not describe is a picture you
-did not read.
+Read the `archive` skill first and take your row from `plumes()`, then
+`attributions()` for anything near it. Read `imagery` before your first
+picture and `carbon-mapper` when the key is a Carbon Mapper record. The
+working directory is yours and is cleared when you finish; keep files there
+and nowhere else. Print csv, never tables.
 
 ## Research
 

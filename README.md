@@ -48,7 +48,11 @@ An agent has a shell, a browser and web search. It runs scripts in the
 shell, reads pages with `obscura fetch URL --dump markdown`, and queries
 the database with `sqlite3 "$BRIC_DB"`, which also gives it a full-text
 search over every page any agent has read. Web search finds pages; the
-pages themselves are what get quoted.
+pages themselves are what get quoted. What a job has already worked out,
+how to query some archive or frame a picture, goes in a skills directory
+(`bric_job.skills`, the [Agent Skills](https://agentskills.io) layout):
+the model gets an index and reads a skill, and runs its scripts, when it
+needs to.
 
 An agent answers by inserting its row into the result table, so a
 constraint or trigger your schema carries is the answer's receipt. There

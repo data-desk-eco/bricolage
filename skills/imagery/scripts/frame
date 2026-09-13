@@ -1,0 +1,7 @@
+#!/bin/sh
+# frame LAT LON KM [PX] — a square of world imagery centred there, KM across, as a jpeg on stdout
+lat=$1 lon=$2 km=$3 px=${4:-1200}
+bbox=$(awk -v a="$lat" -v o="$lon" -v k="$km" 'BEGIN {
+  dy = k / 2 / 111.2; dx = dy / cos(a * atan2(0, -1) / 180);
+  printf "%.5f,%.5f,%.5f,%.5f", o - dx, a - dy, o + dx, a + dy }')
+exec curl -sS "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/export?bbox=$bbox&bboxSR=4326&imageSR=4326&size=$px,$px&format=jpg&f=image"

@@ -1,0 +1,17 @@
+#!/bin/sh
+# q "select ..." — one csv query against the archive; builds archive.db on first use
+db=${ARCHIVE_DB:-archive.db}
+[ -f "$db" ] || duckdb "$db" "
+install httpfs; install spatial;
+create macro bucket(p) as 'https://s3.WAW3-2.cloudferro.com/data-desk-archive/' || p;
+create macro plumes() as table select * from read_parquet(bucket('views/plumes/data.parquet'));
+create macro features() as table select * from read_parquet(bucket('views/features/data.parquet'));
+create macro attributions() as table select * from read_parquet(bucket('views/attributions/data.parquet'));
+create macro detections(tile) as table select * from read_parquet(bucket('views/detections/mgrs=' || tile || '/data.parquet'));
+create macro near(lat0, lon0, km) as table
+  select *, 111.2 * sqrt(((lat - lat0)) ^ 2 + ((lon - lon0) * cos(radians(lat0))) ^ 2) as km
+  from features()
+  where lat between lat0 - km / 111.2 and lat0 + km / 111.2
+    and lon between lon0 - km / (111.2 * cos(radians(lat0))) and lon0 + km / (111.2 * cos(radians(lat0)));
+" || exit 1
+exec duckdb -csv -cmd 'load httpfs; load spatial;' "$db" "$1"

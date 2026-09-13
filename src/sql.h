@@ -27,7 +27,7 @@ static const char sql_field[] =
 static const char sql_image[] =
     "select json_array(json_object('type', 'image', 'source', json_object('type', 'base64', 'media_type', ?1, 'data', ?2)))";
 
-#define SQL_JOBS "select source, target, brief, shell, model, params from bric_job"
+#define SQL_JOBS "select source, target, brief, shell, model, params, skills from bric_job"
 
 static const char sql_job[] = SQL_JOBS " where source = ?1";
 
@@ -117,7 +117,8 @@ static const char sql_schema[] =
     " brief  text not null,"
     " shell  text,"
     " model  text,"
-    " params text"
+    " params text,"
+    " skills text"
     ");"
     " "
     " create table if not exists bric_log ("

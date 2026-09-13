@@ -6,6 +6,7 @@ DB = os.path.join(ROOT, 'test', 'ch4id.db')
 
 
 def sql(*statements, db=DB, load=False):
+    os.environ['BRIC_SKILLS'] = os.path.join(ROOT, 'skills')
     args = [SQLITE, db]
     if load:
         args += ['-cmd', '.load %s/ext/bric' % ROOT]

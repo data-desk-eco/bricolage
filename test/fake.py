@@ -104,7 +104,7 @@ def main():
     server = ThreadingHTTPServer(('127.0.0.1', 0), H)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     base = 'http://127.0.0.1:%d' % server.server_port
-    os.environ.update(SQLITE=SQLITE, BRIC_SQLITE=SQLITE, BRIC_URL=base + '/v1/messages', BRIC_MODEL='fake', BRIC_KEY='secret', BRIC_TIMEOUT='2')
+    os.environ.update(SQLITE=SQLITE, BRIC_SQLITE=SQLITE, BRIC_URL=base + '/v1/messages', BRIC_MODEL='fake', BRIC_KEY='secret', BRIC_TIMEOUT='2', BRIC_SKILLS=os.path.abspath('test/skills'))
     for f in ['test/out.db', 'test/out.db-wal', 'test/out.db-shm']:
         if os.path.exists(f):
             os.remove(f)
@@ -136,6 +136,8 @@ def main():
     assert r.stdout == '1|[image/png, %d bytes]\n' % len(PNG), r.stdout
     r = sqlite("select detail ->> 'command' from bric_log where key = 'acme' and kind = 'call' and tool = 'sh' order by seq limit 1 offset 3;")
     assert r.stdout == 'cat f; sleep 5\n', r.stdout
+    r = sqlite("select detail ->> 'system' like '%skills are what has already been worked out%- echo: says hello' from bric_log where key = 'acme' and kind = 'open';")
+    assert r.stdout == '1\n', r.stdout
     r = sqlite("select detail ->> 'parent', detail ->> 'key' from bric_log where key = 'acme' and kind = 'close';")
     assert r.stdout == 'Globex|acme\n', r.stdout
     r = sqlite("update bric_log set text = 'forged' where key = 'acme' and kind = 'receipt';")

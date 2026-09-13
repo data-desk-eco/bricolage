@@ -5,6 +5,7 @@ SQLITE_EXTENSION_INIT1
 #include <ctype.h>
 #include <errno.h>
 #include <ftw.h>
+#include <glob.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -370,18 +371,66 @@ static void schema(void)
     sqlite3_exec(L, sql_schema, NULL, NULL, NULL);
     sqlite3_exec(L, "alter table bric_job add column model text", NULL, NULL, NULL);
     sqlite3_exec(L, "alter table bric_job add column params text", NULL, NULL, NULL);
+    sqlite3_exec(L, "alter table bric_job add column skills text", NULL, NULL, NULL);
 }
 
 static char **childenv(void)
 {
     int n = 0, m = 0;
     while (environ[n]) n++;
-    char **e = sqlite3_malloc((n + 2) * sizeof *e);
+    char **e = sqlite3_malloc((n + 3) * sizeof *e);
     for (int i = 0; i < n; i++)
-        if (strncmp(environ[i], "BRIC_", 5)) e[m++] = environ[i];
+        if ((strncmp(environ[i], "BRIC_", 5) || !strncmp(environ[i], "BRIC_SKILLS=", 12)) && strncmp(environ[i], "PATH=", 5)) e[m++] = environ[i];
+    char *path = sqlite3_mprintf("PATH="), *pat = sqlite3_mprintf("%s/*/scripts", env("BRIC_SKILLS", ""));
+    glob_t g = { 0 };
+    if (*env("BRIC_SKILLS", "") && !glob(pat, 0, NULL, &g))
+        for (size_t i = 0; i < g.gl_pathc; i++) {
+            char *t = sqlite3_mprintf("%s%s:", path, g.gl_pathv[i]);
+            sqlite3_free(path);
+            path = t;
+        }
+    globfree(&g);
+    sqlite3_free(pat);
+    e[m++] = sqlite3_mprintf("%s%s", path, env("PATH", "/usr/bin:/bin"));
+    sqlite3_free(path);
     e[m++] = sqlite3_mprintf("BRIC_DB=%s", file);
     e[m] = NULL;
     return e;
+}
+
+static char *skills(void)
+{
+    const char *dir = env("BRIC_SKILLS", "");
+    char *s = sqlite3_mprintf(""), *pat = sqlite3_mprintf("%s/*/SKILL.md", dir);
+    glob_t g = { 0 };
+    if (*dir && !glob(pat, 0, NULL, &g))
+        for (size_t i = 0; i < g.gl_pathc; i++) {
+            FILE *f = fopen(g.gl_pathv[i], "r");
+            char line[4096], *name = NULL, *desc = NULL;
+            while (f && fgets(line, sizeof line, f)) {
+                line[strcspn(line, "\n")] = 0;
+                char **at = !strncmp(line, "name:", 5) ? &name : !strncmp(line, "description:", 12) ? &desc : NULL;
+                if (at && !*at) *at = sqlite3_mprintf("%s", line + strcspn(line, ":") + 1 + strspn(line + strcspn(line, ":") + 1, " "));
+            }
+            if (f) fclose(f);
+            if (name && desc) {
+                char *t = sqlite3_mprintf("%s\n- %s: %s", s, name, desc);
+                sqlite3_free(s);
+                s = t;
+            }
+            sqlite3_free(name);
+            sqlite3_free(desc);
+        }
+    globfree(&g);
+    sqlite3_free(pat);
+    if (*s) {
+        char *t = sqlite3_mprintf("\n\nskills are what has already been worked out for this job."
+            " read one with `cat \"$BRIC_SKILLS/<name>/SKILL.md\"` before its first use; its scripts are on your path."
+            " stay in the directory you start in.%s", s);
+        sqlite3_free(s);
+        s = t;
+    }
+    return s;
 }
 
 static int unlink_cb(const char *path, const struct stat *st, int flag, struct FTW *ftw)
@@ -401,7 +450,9 @@ static char *attempt(const char *target, const char *brief, const char *key, con
     q(NULL, sql_dead, a.brief, a.key);
     a.attempt = q(NULL, sql_attempt, a.brief, a.key);
     char *closed = q(NULL, sql_closed, a.brief, a.key);
-    char *system = sqlite3_mprintf("%s\n\n%s", a.brief, ddl);
+    char *index = skills();
+    char *system = sqlite3_mprintf("%s\n\n%s%s", a.brief, ddl, index);
+    sqlite3_free(index);
     int rc = 1, taken = 0;
     char self[16];
     snprintf(self, sizeof self, "%d", getpid());
@@ -449,6 +500,7 @@ static char *attempt(const char *target, const char *brief, const char *key, con
         int n = 0;
         while (a.envp[n + 1]) n++;
         sqlite3_free(a.envp[n]);
+        sqlite3_free(a.envp[n - 1]);
         sqlite3_free(a.envp);
         nftw(a.dir, unlink_cb, 16, FTW_DEPTH | FTW_PHYS);
     }
@@ -479,8 +531,8 @@ static void spawn(sqlite3_stmt *job, const char *where)
     while (waitpid(-1, NULL, WNOHANG) > 0);
     Dl_info self;
     dladdr((void *)spawn, &self);
-    const char *col[6];
-    for (int i = 0; i < 6; i++) col[i] = (const char *)sqlite3_column_text(job, i);
+    const char *col[7];
+    for (int i = 0; i < 7; i++) col[i] = (const char *)sqlite3_column_text(job, i);
     char *load = sqlite3_mprintf(".load %s", self.dli_fname);
     char *sql = sqlite3_mprintf("pragma busy_timeout = 999999999; begin immediate; commit; select run(%Q, %Q, key, %Q) from \"%w\" where %s", col[1], col[2], col[3], col[0], where);
     if (!fork()) {
@@ -488,6 +540,7 @@ static void spawn(sqlite3_stmt *job, const char *where)
         setenv("BRIC_WORKER", "1", 1);
         if (col[4]) setenv("BRIC_MODEL", col[4], 1);
         if (col[5]) setenv("BRIC_PARAMS", col[5], 1);
+        if (col[6]) setenv("BRIC_SKILLS", col[6], 1);
         int null = open("/dev/null", O_RDWR);
         for (int fd = 0; fd < 3; fd++) dup2(null, fd);
         execlp(env("BRIC_SQLITE", "sqlite3"), "sqlite3", file, "-cmd", load, sql, (char *)NULL);
