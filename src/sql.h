@@ -27,11 +27,6 @@ static const char sql_field[] =
 static const char sql_image[] =
     "select json_array(json_object('type', 'image', 'source', json_object('type', 'base64', 'media_type', ?1, 'data', ?2)))";
 
-static const char sql_insert[] =
-    "select 'insert into \"' || ?1 || '\" (\"key\", ' || group_concat('\"' || name || '\"') || ') select ?1, '"
-    " || group_concat('json_extract(?2, ''$.\"' || name || '\"'')')"
-    " from pragma_table_info(?1) where name != 'key'";
-
 static const char sql_job[] =
     "select target, brief, shell from bric_job where source = ?1";
 
@@ -39,8 +34,8 @@ static const char sql_kind[] =
     "select kind from bric_log where job = ?1 and key = ?2 and attempt = ?3 and kind in ('close', 'error')";
 
 static const char sql_log[] =
-    "insert into bric_log (job, key, attempt, turn, kind, tool, detail, usage)"
-    " values (?1, ?2, ?3, ?4, ?5, ?6, ?7, json(?8))"
+    "insert into bric_log (job, key, attempt, turn, kind, tool, detail, text, usage)"
+    " values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, json(?9))"
     " returning seq";
 
 static const char sql_message[] =
@@ -52,14 +47,10 @@ static const char sql_no_call[] =
 
 static const char sql_open[] =
     "insert or ignore into bric_log (job, key, attempt, turn, kind, detail)"
-    " select ?1, ?2, ?3, 0, 'open', json_object('system', ?4, 'pid', ?6)"
+    " select ?1, ?2, ?3, 0, 'open', json_object('system', ?4, 'pid', ?6, 'tools', json(?7), 'shell', ?8)"
     " where cast(?5 as integer) > (select count(*) from ("
     " select 1 from bric_log where attempt is not null group by job, key, attempt"
     " having sum(kind in ('close', 'error')) = 0 and alive(max(iif(kind = 'open', detail ->> 'pid', null)))))";
-
-static const char sql_open_tools[] =
-    "update bric_log set detail = json_set(detail, '$.tools', json(?4), '$.shell', ?5)"
-    " where job = ?1 and key = ?2 and attempt = ?3 and kind = 'open'";
 
 static const char sql_opened[] =
     "select 1 from bric_log where job = ?1 and key = ?2 and attempt = ?3 and kind = 'open'";
@@ -92,6 +83,10 @@ static const char sql_request[] =
 static const char sql_result[] =
     "select json_object('type', 'tool_result', 'tool_use_id', ?1, 'content', iif(json_valid(?2), json(?2), ?2))";
 
+static const char sql_row[] =
+    "select 'select json_object(' || group_concat('''' || name || ''', \"' || name || '\"') || ') from \"' || ?1 || '\" where \"key\" = ?1'"
+    " from pragma_table_info(?1)";
+
 static const char sql_schema[] =
     "create table if not exists bric_job ("
     " source text primary key,"
@@ -121,8 +116,14 @@ static const char sql_schema[] =
     " "
     " create virtual table if not exists bric_page using fts5 (text, content = 'bric_log', content_rowid = 'seq');"
     " "
-    " create trigger if not exists bric_page_index after update of text on bric_log when new.text is not null"
+    " create trigger if not exists bric_page_index after insert on bric_log when new.text is not null"
     " begin insert into bric_page (rowid, text) values (new.seq, new.text); end;"
+    " "
+    " create trigger if not exists bric_log_update before update on bric_log"
+    " begin select raise(abort, 'bric_log is append-only'); end;"
+    " "
+    " create trigger if not exists bric_log_delete before delete on bric_log"
+    " begin select raise(abort, 'bric_log is append-only'); end;"
     " "
     " create view if not exists bric_attempt as"
     " select l.job, l.key, l.attempt, l.turn, l.ts, l.kind, l.tool, l.detail, u.input, u.output, u.cache_read"
@@ -165,28 +166,13 @@ static const char sql_sh_tool[] =
     " 'description', 'run a posix shell script. the receipt is stdout and stderr merged, then [exit N] when the status is not zero. '"
     " || 'the working directory is a scratch directory kept for this attempt, so files persist between calls. stdout that is a png or jpeg is shown to you as an image. '"
     " || '`obscura fetch URL --dump markdown --quiet` reads a page through a browser (--dump text|links|html; --screenshot p.png, then `cat p.png` to look at it). '"
-    " || '`sqlite3 -readonly \"$BRIC_DB\"` is this database: bric_page is fts5 over every page any attempt here has read'"
-    " || ' (`select rowid, snippet(bric_page, 0, '''', '''', '' ... '', 48) from bric_page where bric_page match ''x''`; the rowid is a seq you may cite as if you had read the page),'"
-    " || ' bric_log holds the full text of any receipt (`select text from bric_log where seq = N`), and finished result tables are there to read. '"
-    " || 'a receipt over 20000 characters is cut; page it from bric_log or narrow the script''s output',"
+    " || '`sqlite3 \"$BRIC_DB\"` is the research database. bric_page is fts5 over every page any attempt here has read'"
+    " || ' (`select rowid, snippet(bric_page, 0, '''', '''', '' ... '', 48) from bric_page where bric_page match ''x''`); its rowid is a seq you may cite as if you had read the page.'"
+    " || ' bric_log holds the full text of any receipt (`select text from bric_log where seq = N`). a receipt over 20000 characters is cut; page it from bric_log or narrow the script''s output. '"
+    " || 'your answer is a row in ' || ?1 || ': insert it with sqlite3, key = your key, against the ddl in the system prompt. a constraint or trigger failure is your receipt, so correct and retry. '"
+    " || 'a column naming a source takes the seq of the receipt whose own text contains your quote (a bric_page rowid is such a seq; web_search results have none). '"
+    " || 'once a row for your key exists at the end of a turn you are done',"
     " 'input_schema', json_object('type', 'object', 'properties', json_object('script', json_object('type', 'string')), 'required', json_array('script')))";
-
-static const char sql_submit_tool[] =
-    "select json_object("
-    " 'name', 'submit',"
-    " 'description', 'insert the row for this key into ' || ?1 || '. sqlite validates it against the ddl in the system prompt; an error is your receipt, so correct and resubmit. '"
-    " || 'a column naming a source takes the number from the [seq N] head of the tool receipt whose own text contains your quote verbatim (a bric_page rowid is such a seq; a web_search result has none)',"
-    " 'input_schema', json_object("
-    " 'type', 'object',"
-    " 'properties', json_group_object(name, json_object('type',"
-    " case when type like '%int%' then 'integer'"
-    " when type like '%rea%' or type like '%flo%' or type like '%dou%' or type like '%num%' then 'number'"
-    " else 'string' end)),"
-    " 'required', (select json_group_array(name) from pragma_table_info(?1) where \"notnull\" and name != 'key')))"
-    " from pragma_table_info(?1) where name != 'key'";
-
-static const char sql_text[] =
-    "update bric_log set text = ?2 where seq = ?1";
 
 static const char sql_usage[] =
     "select json_object('input', ?1 ->> '$.usage.input_tokens', 'output', ?1 ->> '$.usage.output_tokens', 'cache_read', ?1 ->> '$.usage.cache_read_input_tokens')";

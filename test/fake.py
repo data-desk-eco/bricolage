@@ -12,8 +12,9 @@ def sh(id, script):
     return {'type': 'tool_use', 'id': id, 'name': 'sh', 'input': {'script': script}}
 
 
-def submit(id, **row):
-    return {'type': 'tool_use', 'id': id, 'name': 'submit', 'input': row}
+def insert(id, table, **row):
+    vals = ', '.join("'%s'" % v.replace("'", "''") if isinstance(v, str) else str(v) for v in row.values())
+    return sh(id, '%s "$BRIC_DB" <<\'EOF\'\ninsert into %s (%s) values (%s);\nEOF' % (SQLITE, table, ', '.join(row), vals))
 
 
 class H(BaseHTTPRequestHandler):
@@ -37,7 +38,7 @@ class H(BaseHTTPRequestHandler):
                 content = [sh('b1', 'echo "X=$X"')]
             else:
                 assert last.endswith('] X=1'), last
-                content = [submit('b2', parent='Globex')]
+                content = [insert('b2', 'bare', key=key, parent='Globex')]
         elif key == 'plain':
             content = [{'type': 'text', 'text': 'no idea'}]
         elif turn == 0:
@@ -51,14 +52,14 @@ class H(BaseHTTPRequestHandler):
             assert results[-2].split('] ', 1)[1] == '[image/png, %d bytes]' % len(PNG), results[-2]
             assert last.split('] ', 1)[1].startswith('K=|D=%s|P=' % os.path.abspath('test/out.db')), last
             assert last.endswith('\n2\n[exit 3]'), last
-            content = [sh('c4', 'cat f; sleep 5'), submit('c5', parent='Globex', confidence='certain', source=md, quote=quote)]
+            content = [sh('c4', 'cat f; sleep 5'), insert('c5', 'results', key=key, parent='Globex', confidence='certain', source=md, quote=quote)]
         elif turn == 2:
             assert results[-2].endswith('] x\n[killed after timeout]'), results[-2]
             assert 'confidence' in last, last
-            content = [submit('c6', parent='Globex', confidence='high', source=md - 1, quote=quote)]
+            content = [insert('c6', 'results', key=key, parent='Globex', confidence='high', source=md - 1, quote=quote)]
         elif turn == 3:
             assert 'quote not found' in last, last
-            content = [submit('c7', parent='Globex', confidence='high', source=md, quote=quote)]
+            content = [insert('c7', 'results', key=key, parent='Globex', confidence='high', source=md, quote=quote)]
         else:
             content = [{'type': 'text', 'text': 'giving up'}]
         time.sleep(0.2)
@@ -82,7 +83,7 @@ create table if not exists results (
 create trigger if not exists results_cite before insert on results
 begin
   select raise(abort, 'quote not found in source ' || new.source)
-   where not exists (select 1 from bric_log where seq = new.source and instr(text, squeeze(new.quote)));
+   where not exists (select 1 from bric_page('"' || replace(new.quote, '"', '""') || '"') where rowid = new.source);
 end;
 select run('results', 'Resolve each operator to its parent.', key) from company where key not in (select key from results);
 '''
@@ -112,7 +113,7 @@ def main():
         "select seq from bric_log where key = '%s' and kind = 'receipt' and tool = 'sh' order by seq limit 1;" % k).stdout.strip()) for k in ['acme', 'bolt', 'cog']), r.stdout
     r = sqlite("select key, sum(kind = 'open'), sum(kind = 'close'), sum(kind = 'error') from bric_log where kind in ('open', 'close', 'error') group by 1 order by 1;")
     assert r.stdout in ('acme|1|1|0\nbolt|1|1|0\ncog|1|1|0\nplain|%d|0|%d\n' % (n, n) for n in (1, 2)), r.stdout
-    r = sqlite("select count(*) from bric_log where kind = 'receipt' and tool != 'submit' and text is null;")
+    r = sqlite("select count(*) from bric_log where kind = 'receipt' and text is null;")
     assert r.stdout == '0\n', r.stdout
     r = sqlite("select distinct detail from bric_log where key = 'plain' and kind = 'error';")
     assert r.stdout == 'reply without submission: no idea\n', r.stdout
@@ -121,14 +122,19 @@ def main():
     r = sqlite("select kind, input, output from bric_attempt where key = 'acme';")
     assert r.stdout == 'close|40|20\n', r.stdout
     r = sqlite("select json_array_length(detail -> 'tools'), detail ->> 'shell', detail -> 'tools' ->> '$[1].name' from bric_log where key = 'acme' and kind = 'open';")
-    assert r.stdout == '3|sh|sh\n', r.stdout
+    assert r.stdout == '2|sh|sh\n', r.stdout
     r = sqlite("select instr(text, '  '), detail like '%chars: Acme Ltd is a wholly owned' from bric_log where key = 'acme' and kind = 'receipt' and tool = 'sh' order by seq limit 1;")
     assert r.stdout == '0|1\n', r.stdout
     r = sqlite("select detail like '%; 1 image % chars', text from bric_log where key = 'acme' and kind = 'receipt' and tool = 'sh' order by seq limit 1 offset 1;")
     assert r.stdout == '1|[image/png, %d bytes]\n' % len(PNG), r.stdout
     r = sqlite("select detail ->> 'script' from bric_log where key = 'acme' and kind = 'call' and tool = 'sh' order by seq limit 1 offset 3;")
     assert r.stdout == 'cat f; sleep 5\n', r.stdout
-    r = sqlite("delete from bric_log where key = 'plain';",
+    r = sqlite("select detail ->> 'parent', detail ->> 'key' from bric_log where key = 'acme' and kind = 'close';")
+    assert r.stdout == 'Globex|acme\n', r.stdout
+    r = sqlite("update bric_log set text = 'forged' where key = 'acme' and kind = 'receipt';")
+    assert 'append-only' in r.stderr, r.stderr
+    r = sqlite("drop trigger bric_log_update; drop trigger bric_log_delete;",
+               "delete from bric_log where key = 'plain';",
                "insert into bric_log (ts, job, key, attempt, turn, kind) values (datetime('now', '-1 hour'), 'Resolve each operator to its parent.', 'plain', 1, 3, 'call');",
                "delete from results where key = 'acme';",
                "delete from bric_log where key = 'acme' and kind = 'close';")
@@ -145,7 +151,7 @@ def main():
     r = sqlite("select detail ->> 'shell', (select parent from bare) from bric_log where job = 'bare shell' and kind = 'open';")
     assert r.stdout == 'env X=1 sh|Globex\n', r.stdout
     r = sqlite("select json_array_length(messages), messages ->> '$[1].content[0].type', messages ->> '$[2].content[0].tool_use_id' from bric_transcript where key = 'bolt';")
-    assert r.stdout == '8|tool_use|c1\n', r.stdout
+    assert r.stdout == '9|tool_use|c1\n', r.stdout
     assert not [d for d in os.listdir(os.environ.get('TMPDIR', '/tmp')) if d.startswith('bric.')]
 
     os.environ['BRIC_WORKERS'] = '1'

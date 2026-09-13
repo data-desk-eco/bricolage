@@ -44,7 +44,7 @@ key that has no result, insert them again:
 
 ## Tools
 
-The model has three tools, and one of them is a shell.
+The model has a shell and web search, and answers with a SQL insert.
 
 - **`sh`** runs a script and returns what it printed. Every receipt is
   stored squeezed in `bric_log.text` with a `seq`, and a result row cites
@@ -54,15 +54,22 @@ The model has three tools, and one of them is a shell.
   working directory is a scratch directory kept for the attempt and deleted
   after it; stdout that is a PNG or JPEG is shown to the model as an image.
   From the shell, `obscura fetch URL --dump markdown` is the browser and
-  `sqlite3 -readonly "$BRIC_DB"` is this database: `bric_page` is a
-  full-text search over every page any attempt has read, so the hundredth
-  operator is resolved against the pages the first ninety-nine read, and
-  finished result tables are there to query.
-- **`submit`** inserts the row for the key, typed from the target table's
-  DDL. A constraint or trigger failure is the receipt.
+  `sqlite3 "$BRIC_DB"` is this database: `bric_page` is a full-text
+  search over every page any attempt has read, so the hundredth operator
+  is resolved against the pages the first ninety-nine read, and finished
+  result tables are there to query.
+- **The answer is an insert.** The model writes its row into the result
+  table with `sqlite3`, against the DDL in its system prompt. A constraint
+  or trigger failure is its receipt. Once a row for the key exists at the
+  end of a turn, the attempt is closed with that row as the record. There
+  is no submit tool: SQLite is the contract and the transport.
 - **Web search** from the provider, via Anthropic's `web_search` server
   tool. Works on Anthropic's API and DeepSeek's Anthropic-format endpoint.
   For finding pages, not citing them.
+
+Because the model writes to the database, `bric_log` is append-only by
+trigger: neither an agent nor a slip of yours can edit or delete a receipt.
+Drop the two triggers to prune.
 
 ## Sandbox
 
@@ -71,14 +78,16 @@ extension never learns what isolation is; you compose it from whatever
 speaks stdin and stdout:
 
     BRIC_SHELL='sandbox-exec -f bric.sb sh'                    # macOS seatbelt
-    BRIC_SHELL='bwrap --ro-bind / / --tmpfs /tmp --bind . /work --chdir /work --unshare-pid --die-with-parent sh'
-    BRIC_SHELL='docker run --rm -i -v "$PWD":/work -w /work -v /srv/data:/data:ro tools sh'
-    BRIC_SHELL='ssh jail sh'
+    BRIC_SHELL='bwrap --ro-bind / / --tmpfs /tmp --bind . . --bind "$(dirname "$BRIC_DB")" "$(dirname "$BRIC_DB")" --unshare-pid --die-with-parent sh'
+    BRIC_SHELL='docker run --rm -i -v "$PWD":"$PWD" -w "$PWD" -v "$(dirname "$BRIC_DB")":"$(dirname "$BRIC_DB")" -e BRIC_DB tools sh'
 
 The command runs with the attempt's scratch directory as its working
-directory, so `$PWD` in a Docker line mounts it. A job can name its own
-sandbox in `bric_job.shell`, so a geospatial job runs in an image with GDAL
-while the rest use `sh`. Adding a tool is installing it where that shell
-can see it, and telling the model about it in the brief.
+directory and `BRIC_DB` set to the database's path, so `$PWD` and
+`$BRIC_DB` in a Docker line mount both. The database's directory must be
+writable from inside, since the answer is an insert and WAL keeps its
+journal beside the file. A job can name its own sandbox in
+`bric_job.shell`, so a geospatial job runs in an image with GDAL while the
+rest use `sh`. Adding a tool is installing it where that shell can see it,
+and telling the model about it in the brief.
 
 Functions, tables, views and configuration are in [docs/api.md](docs/api.md).

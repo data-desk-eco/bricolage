@@ -11,8 +11,10 @@ Runs one research attempt for `key` and inserts the answer into `target`.
 constraints and triggers, is the contract the model writes against and the
 one SQLite enforces. `brief` is the task in prose, shared by every key in
 the job. `shell` is the sandbox command, default `BRIC_SHELL`. The model
-has `web_search`, `sh` and `submit`; see [Shell](#shell) for what `sh` is
-given.
+has `web_search` and `sh`, and answers by inserting its row with `sqlite3`;
+after every turn the worker checks `target` for a row with this `key`, and
+the first one it finds closes the attempt. See [Shell](#shell) for what
+`sh` is given.
 
 Returns `'close'` when the row was inserted, `'error'` when the model gave
 up, and `NULL` when the attempt did not finish: the key was claimed by
@@ -32,8 +34,9 @@ dead-attempt check and the worker slots.
 ## `squeeze(text)`
 
 Collapses runs of whitespace to one space and strips base64 data URLs. Every
-receipt is stored squeezed, so apply it to a quote before matching it
-against `bric_log.text`, as the trigger in `company.sql` does.
+receipt is stored squeezed. A cite trigger should not need it: a phrase
+query against `bric_page`, as in `company.sql`, ignores whitespace, case
+and punctuation and works from any `sqlite3`, including the model's.
 
 ## `bric_job`
 
@@ -63,12 +66,15 @@ The append-only log, one row per event. `job` is the brief, `key` and
 | `reply`   | a model turn; `detail` is its content verbatim, including any thinking |
 | `call`    | a tool call the model made; `tool` and `detail` (arguments; for `sh`, `{"script": ...}`) |
 | `receipt` | a tool result; `text` is its squeezed content, `seq` is what a result row cites as its source |
-| `close`   | the row was inserted; `detail` is the submission            |
+| `close`   | a row for the key exists in the target; `detail` is that row as JSON |
 | `error`   | the attempt failed; `detail` says why                       |
 
 `usage` holds the token counts per turn as JSON. A partial unique index
 over `(job, key, attempt)` for `open`, `close` and `error` is the claim:
-two workers cannot open the same attempt.
+two workers cannot open the same attempt. Triggers refuse every update and
+delete, so the log is append-only for the model, which can reach it from
+its shell, and for you; drop `bric_log_update` and `bric_log_delete` to
+prune.
 
 ## `bric_page`
 
@@ -76,7 +82,16 @@ FTS5 over `bric_log.text`, filled by trigger as receipts are stored.
 `select rowid, snippet(bric_page, 0, '', '', ' ... ', 48) from bric_page
 where bric_page match 'x'` finds every page any attempt has read, and the
 rowid is a `seq` a result row may cite. The model runs this through
-`sqlite3` in its shell; so can you.
+`sqlite3` in its shell; so can you. It is also the cite check: a result
+table's trigger asks whether the quote is a phrase on the cited receipt,
+
+    where not exists (
+      select 1 from bric_page('"' || replace(new.quote, '"', '""') || '"')
+      where rowid = new.source
+    )
+
+using the table-valued form, which the `sqlite3` shell allows inside a
+trigger where the `match` operator is refused as unsafe.
 
 ## `bric_attempt`
 
@@ -99,7 +114,12 @@ script on stdin, stdout and stderr merged into the receipt, and `[exit N]`
 appended when the status is not zero. `<dir>` is a scratch directory made
 for the attempt under `TMPDIR` and removed when it ends. The environment
 is the worker's minus every `BRIC_*` variable, so the API key is not in
-the sandbox, plus `BRIC_DB`, the database's path. Output that begins with
+the sandbox, plus `BRIC_DB`, the database's path. The model reads and
+writes the database through `sqlite3 "$BRIC_DB"`, so the sandbox must be
+able to open that path for writing, journal files included. The `sqlite3`
+shell has no busy timeout, so a write that lands while a worker is logging
+fails with `database is locked`; that is a receipt like any other and the
+model retries, or the brief can suggest `-cmd '.timeout 10000'`. Output that begins with
 a PNG or JPEG header is sent to the model as an image; output with a NUL
 byte in it is reported by size only. After `BRIC_TIMEOUT` seconds, or 4
 MiB of output, the process group is killed and the receipt says so.
