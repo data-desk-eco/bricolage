@@ -24,14 +24,6 @@ static const char sql_dead[] =
 static const char sql_field[] =
     "select ?1 -> ?2 ->> ?3";
 
-static const char sql_forget[] =
-    "select json_group_array(json(iif(m.value ->> 'role' = 'user' and json_type(m.value, '$.content') = 'array',"
-    " json_object('role', 'user', 'content', (select json_group_array(json(iif(json_type(r.value, '$.content') = 'array',"
-    " json_set(r.value, '$.content', (select json_group_array(json(iif(c.value ->> 'type' = 'image',"
-    " json_object('type', 'text', 'text', '[an image, shown when it was fresh; run the command again to see it]'), c.value)))"
-    " from json_each(r.value, '$.content') as c)), r.value))) from json_each(m.value, '$.content') as r)), m.value)))"
-    " from json_each(?1) as m";
-
 static const char sql_image[] =
     "select json_array(json_object('type', 'image', 'source', json_object('type', 'base64', 'media_type', ?1, 'data', ?2)))";
 

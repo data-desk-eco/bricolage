@@ -128,7 +128,7 @@ One row per `(job, key, attempt)` with `messages`, the conversation as the
 API saw it, rebuilt from the log: the key, each `reply`, and each turn's
 receipts as `tool_result` blocks. Together with the `open` row's system
 prompt and tools this is the whole request, so any attempt can be replayed
-or resumed. Images are not kept, which is also what the model sees after the turn they arrived in.
+or resumed. Images are not kept.
 
 ## Shell
 
@@ -143,10 +143,10 @@ able to open that path for writing, journal files included. The `sqlite3`
 shell has no busy timeout, so a write that lands while a worker is logging
 fails with `database is locked`; that is a receipt like any other and the
 model retries, or the brief can suggest `-cmd '.timeout 10000'`. Output that begins with
-a PNG or JPEG header is sent to the model as an image, once: the next turn
-replaces it with a note, so a picture costs its size one time and the model
-runs the command again to look again. Output with a NUL byte in it, or an
-image the cut below truncated, is reported by size only. After `BRIC_TIMEOUT` seconds, or 4
+a PNG or JPEG header is sent to the model as an image, and stays in the
+conversation like any receipt: nothing sent is ever rewritten, so the
+prompt cache holds. Output with a NUL byte in it, or an image the cut below
+truncated, is reported by size only. After `BRIC_TIMEOUT` seconds, or 4
 MiB of output, the process group is killed and the receipt says so.
 Anything that escapes the process group, such as a container the client
 was detached from, is the sandbox command's to stop. Calls in one model

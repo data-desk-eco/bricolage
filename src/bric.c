@@ -355,9 +355,7 @@ static void turn(Attempt *a, const char *system, char **messages)
         char left[16];
         snprintf(left, sizeof left, "%d", a->turns - a->turn);
         char *nudged = a->turns - a->turn <= 3 ? q(NULL, sql_nudge, results, left, a->target) : NULL;
-        char *kept = q(NULL, sql_forget, *messages);
-        next = q(NULL, sql_message, kept, "user", nudged ? nudged : results);
-        sqlite3_free(kept);
+        next = q(NULL, sql_message, *messages, "user", nudged ? nudged : results);
         sqlite3_free(nudged);
         sqlite3_free(*messages);
         *messages = next;
