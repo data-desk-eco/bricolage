@@ -16,10 +16,10 @@ after every turn the worker checks `target` for a row with this `key`, and
 the first one it finds closes the attempt. See [Shell](#shell) for what
 `sh` is given.
 
-Returns `'close'` when the row was inserted, `'error'` when the model gave
-up, and `NULL` when the attempt did not finish: the key was claimed by
-another worker, the scratch directory could not be made, or the turn cap
-was hit. A key that already has a close row returns `'close'` without a model
+Returns `'close'` when the row was inserted, `'error'` when the attempt
+failed, with the `error` row saying why (the model stopped without a row,
+the API refused a request, the scratch directory could not be made, or the
+turn cap was hit), and `NULL` when another worker claimed the attempt. A key that already has a close row returns `'close'` without a model
 call, and an attempt whose worker process is gone (`kill -0` on the pid in
 its `open` row) is treated as dead and retried, so a `SELECT run(...)` over
 the whole to-do list is safe to rerun.
@@ -33,8 +33,9 @@ dead-attempt check and the worker slots.
 
 ## `squeeze(text)`
 
-Collapses runs of whitespace to one space and strips base64 data URLs. Every
-receipt is stored squeezed. A cite trigger should not need it: a phrase
+Collapses runs of whitespace to one space and strips base64 data URLs and
+bytes that are not UTF-8, which an API would refuse. Every receipt is stored
+squeezed. A cite trigger should not need it: a phrase
 query against `bric_page`, as in `company.sql`, ignores whitespace, case
 and punctuation and works from any `sqlite3`, including the model's.
 
@@ -49,7 +50,9 @@ Insert a row to register a job:
 
 From then on, on any connection with the extension loaded, each row
 inserted into `source` gets a worker, `sqlite3 db "select run(target,
-brief, key, shell)"`, that outlives the connection. `shell` NULL means
+brief, key, shell)"`, that outlives the connection. The worker waits for
+the inserting transaction to commit, and does nothing if it rolls back, so
+a bulk `.import` loses no keys. `shell` NULL means
 `BRIC_SHELL`. Update or delete the row to change or stop the job; the
 change applies to the next insert, not to workers already running.
 The database must be a file: on an in-memory database nothing is

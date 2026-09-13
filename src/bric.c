@@ -64,13 +64,21 @@ static void squeeze(char *s)
                 if (!memcmp(p, ";base64,", 8)) { r = e - 1; break; }
             if (r == e - 1) continue;
         }
-        if (isspace((unsigned char)*r)) {
-            space = *r == '\n' || space == 2 ? 2 : 1;
+        unsigned char c = *r;
+        int n = c < 0x80 ? 1 : c < 0xc2 ? 0 : c < 0xe0 ? 2 : c < 0xf0 ? 3 : c < 0xf5 ? 4 : 0;
+        unsigned lo = c == 0xe0 ? 0xa0 : c == 0xf0 ? 0x90 : 0x80, hi = c == 0xed ? 0x9f : c == 0xf4 ? 0x8f : 0xbf;
+        for (int i = 1; i < n; i++, lo = 0x80, hi = 0xbf)
+            if ((unsigned char)r[i] < lo || (unsigned char)r[i] > hi) n = 0;
+        if (!n) continue;
+        if (n == 1 && isspace(c)) {
+            space = c == '\n' || space == 2 ? 2 : 1;
             continue;
         }
         if (space && w > s) *w++ = space == 2 ? '\n' : ' ';
         space = 0;
-        *w++ = *r;
+        memmove(w, r, n);
+        w += n;
+        r += n - 1;
     }
     *w = 0;
 }
@@ -458,7 +466,7 @@ static void spawn(const char *target, const char *brief, const char *source, sql
     Dl_info self;
     dladdr((void *)spawn, &self);
     char *load = sqlite3_mprintf(".load %s", self.dli_fname);
-    char *sql = sqlite3_mprintf("select run(%Q, %Q, key, %Q) from \"%w\" where rowid = %lld", target, brief, shell, source, rowid);
+    char *sql = sqlite3_mprintf("pragma busy_timeout = 999999999; begin immediate; commit; select run(%Q, %Q, key, %Q) from \"%w\" where rowid = %lld", target, brief, shell, source, rowid);
     if (!fork()) {
         setsid();
         int null = open("/dev/null", O_RDWR);

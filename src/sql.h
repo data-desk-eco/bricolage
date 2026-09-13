@@ -84,7 +84,8 @@ static const char sql_result[] =
     "select json_object('type', 'tool_result', 'tool_use_id', ?1, 'content', iif(json_valid(?2), json(?2), ?2))";
 
 static const char sql_row[] =
-    "select 'select json_object(' || group_concat('''' || name || ''', \"' || name || '\"') || ') from \"' || ?1 || '\" where \"key\" = ?1'"
+    "select printf('select json_object(%s) from \"%w\" where \"key\" = ?1',"
+    " group_concat(printf('%Q, iif(typeof(\"%w\") = ''blob'', cast(\"%w\" as text), \"%w\")', name, name, name, name)), ?1)"
     " from pragma_table_info(?1)";
 
 static const char sql_schema[] =
@@ -169,7 +170,7 @@ static const char sql_sh_tool[] =
     " || '`sqlite3 \"$BRIC_DB\"` is the research database. bric_page is fts5 over every page any attempt here has read'"
     " || ' (`select rowid, snippet(bric_page, 0, '''', '''', '' ... '', 48) from bric_page where bric_page match ''x''`); its rowid is a seq you may cite as if you had read the page.'"
     " || ' bric_log holds the full text of any receipt (`select text from bric_log where seq = N`). a receipt over 20000 characters is cut; page it from bric_log or narrow the script''s output. '"
-    " || 'your answer is a row in ' || ?1 || ': insert it with sqlite3, key = your key, against the ddl in the system prompt. a constraint or trigger failure is your receipt, so correct and retry. '"
+    " || 'your key is the first user message, verbatim. your answer is a row in ' || ?1 || ' with that key: insert it with sqlite3 against the ddl in the system prompt. a constraint or trigger failure is your receipt, so correct and retry. '"
     " || 'a column naming a source takes the seq of the receipt whose own text contains your quote (a bric_page rowid is such a seq; web_search results have none). '"
     " || 'once a row for your key exists at the end of a turn you are done',"
     " 'input_schema', json_object('type', 'object', 'properties', json_object('script', json_object('type', 'string')), 'required', json_array('script')))";

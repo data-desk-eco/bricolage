@@ -38,13 +38,13 @@ class H(BaseHTTPRequestHandler):
                 content = [sh('b1', 'echo "X=$X"')]
             else:
                 assert last.endswith('] X=1'), last
-                content = [insert('b2', 'bare', key=key, parent='Globex')]
+                content = [sh('b2', '%s "$BRIC_DB" "insert into bare values (\'%s\', cast(\'Globex\' as blob))"' % (SQLITE, key))]
         elif key == 'plain':
             content = [{'type': 'text', 'text': 'no idea'}]
         elif turn == 0:
             content = [sh('c1', "cat <<'EOF'\n%s\nEOF" % PAGE),
                        sh('c2', "printf '%s'" % ''.join('\\%03o' % b for b in PNG)),
-                       sh('c3', 'echo "K=$BRIC_KEY|D=$BRIC_DB|P=$PWD"; %s -readonly "$BRIC_DB" "select count(*) from bric_log where key = \'%s\' and kind = \'receipt\' and attempt = (select max(attempt) from bric_log where key = \'%s\')"; echo x > f; exit 3' % (SQLITE, key, key))]
+                       sh('c3', 'echo "K=$BRIC_KEY|D=$BRIC_DB|P=$PWD"; printf \'\\377\\303\'; %s -readonly "$BRIC_DB" "select count(*) from bric_log where key = \'%s\' and kind = \'receipt\' and attempt = (select max(attempt) from bric_log where key = \'%s\')"; echo x > f; exit 3' % (SQLITE, key, key))]
         elif turn == 1:
             assert md, results
             images = [x['source'] for b in blocks if isinstance(b, list) for x in b[1:]]
@@ -147,7 +147,7 @@ def main():
     r = sqlite(SQL)
     assert not r.returncode and len(H.calls) == calls, r.stderr
     r = sqlite(".load ./ext/bric", "create table bare (key text primary key, parent text);", "select run('bare', 'bare shell', 'acme', 'env X=1 sh');")
-    assert not r.returncode, r.stderr
+    assert r.stdout == 'close\n', (r.stdout, r.stderr)
     r = sqlite("select detail ->> 'shell', (select parent from bare) from bric_log where job = 'bare shell' and kind = 'open';")
     assert r.stdout == 'env X=1 sh|Globex\n', r.stdout
     r = sqlite("select json_array_length(messages), messages ->> '$[1].content[0].type', messages ->> '$[2].content[0].tool_use_id' from bric_transcript where key = 'bolt';")
@@ -157,7 +157,8 @@ def main():
     os.environ['BRIC_WORKERS'] = '1'
     r = sqlite(".load ./ext/bric",
                "insert into bric_job (source, target, brief) values ('company', 'results', 'Resolve each operator to its parent.');",
-               "begin; insert into company (key) values ('dyn'), ('dyn2'); commit;",
+               "begin; insert into company (key) values ('undo'); rollback;",
+               "begin; insert into company (key) values ('dyn'), ('dyn2');", ".system sleep 1", "commit;",
                "select count(*) from bric_log where key = 'dyn';")
     assert r.stdout == '0\n', (r.returncode, r.stdout, r.stderr)
     for _ in range(100):
