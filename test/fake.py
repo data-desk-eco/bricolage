@@ -26,8 +26,12 @@ class H(BaseHTTPRequestHandler):
     def do_POST(self):
         req = json.loads(self.rfile.read(int(self.headers['content-length'])))
         H.calls.append(req)
-        turn = sum(m['role'] == 'assistant' for m in req['messages'])
         key = req['messages'][0]['content']
+        paused = key == 'bolt' and req['messages'][-1]['role'] == 'assistant'
+        turn = sum(m['role'] == 'assistant' for m in req['messages'])
+        turn -= key == 'bolt' and turn > 0
+        if paused:
+            assert req['messages'][-1]['content'][0]['type'] == 'server_tool_use', req['messages'][-1]
         blocks = [c['content'] for m in req['messages'] if m['role'] == 'user' and isinstance(m['content'], list) for c in m['content']]
         results = [b[0]['text'] if isinstance(b, list) else b for b in blocks]
         last = results[-1] if results else ''
@@ -41,6 +45,8 @@ class H(BaseHTTPRequestHandler):
                 content = [sh('b2', '%s "$BRIC_DB" "insert into bare values (\'%s\', cast(\'Globex\' as blob))"' % (SQLITE, key))]
         elif key == 'plain':
             content = [{'type': 'text', 'text': 'no idea'}]
+        elif key == 'bolt' and turn == 0 and not paused:
+            content = [{'type': 'server_tool_use', 'id': 's1', 'name': 'web_search', 'input': {'query': 'bolt'}}]
         elif turn == 0:
             content = [sh('c1', "cat <<'EOF'\n%s\nEOF" % PAGE),
                        sh('c2', "printf '%s'" % ''.join('\\%03o' % b for b in PNG)),
@@ -63,7 +69,8 @@ class H(BaseHTTPRequestHandler):
         else:
             content = [{'type': 'text', 'text': 'giving up'}]
         time.sleep(0.2)
-        body = json.dumps({'content': content, 'stop_reason': 'tool_use', 'usage': {'input_tokens': 10, 'output_tokens': 5, 'cache_read_input_tokens': 1}}).encode()
+        stop = 'pause_turn' if content[0]['type'] == 'server_tool_use' else 'tool_use'
+        body = json.dumps({'content': content, 'stop_reason': stop, 'usage': {'input_tokens': 10, 'output_tokens': 5, 'cache_read_input_tokens': 1}}).encode()
         self.send_response(200)
         self.send_header('content-type', 'application/json')
         self.send_header('content-length', str(len(body)))
@@ -150,8 +157,8 @@ def main():
     assert r.stdout == 'close\n', (r.stdout, r.stderr)
     r = sqlite("select detail ->> 'shell', (select parent from bare) from bric_log where job = 'bare shell' and kind = 'open';")
     assert r.stdout == 'env X=1 sh|Globex\n', r.stdout
-    r = sqlite("select json_array_length(messages), messages ->> '$[1].content[0].type', messages ->> '$[2].content[0].tool_use_id' from bric_transcript where key = 'bolt';")
-    assert r.stdout == '9|tool_use|c1\n', r.stdout
+    r = sqlite("select json_array_length(messages), messages ->> '$[1].content[0].type', messages ->> '$[2].content[0].type', messages ->> '$[3].content[0].tool_use_id' from bric_transcript where key = 'bolt';")
+    assert r.stdout == '10|server_tool_use|tool_use|c1\n', r.stdout
     assert not [d for d in os.listdir(os.environ.get('TMPDIR', '/tmp')) if d.startswith('bric.')]
 
     os.environ['BRIC_WORKERS'] = '1'

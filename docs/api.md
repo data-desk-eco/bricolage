@@ -86,7 +86,7 @@ The append-only log, one row per event. `job` is the brief, `key` and
 | `kind`    | what                                                       |
 |-----------|------------------------------------------------------------|
 | `open`    | attempt claimed; `detail` is the system prompt, the tools as sent, the `shell` and the worker `pid` |
-| `reply`   | a model turn; `detail` is its content verbatim, including any thinking |
+| `reply`   | a model turn; `detail` is its content verbatim, including any thinking; a `pause_turn` reply (the server paused a long search turn) is resent as is, and only a turn that ends without a call or a row is an error |
 | `call`    | a tool call the model made; `tool` and `detail` (arguments; for `sh`, `{"command": ...}`) |
 | `receipt` | a tool result; `text` is its squeezed content, `seq` is what a result row cites as its source |
 | `close`   | a row for the key exists in the target; `detail` is that row as JSON |

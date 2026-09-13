@@ -343,12 +343,15 @@ static void turn(Attempt *a, const char *system, char **messages)
         sqlite3_free(input);
         sqlite3_free(id);
     }
-    if (!settled(a) && !n) {
+    char *stop = q(NULL, sql_field, reply, "$", "stop_reason");
+    int paused = !n && stop && !strcmp(stop, "pause_turn");
+    sqlite3_free(stop);
+    if (!settled(a) && !n && !paused) {
         char *text = q(NULL, sql_no_call, reply);
         sqlite3_free(logrow(a, "error", NULL, text, NULL));
         sqlite3_free(text);
     }
-    if (!a->done) {
+    if (!a->done && !paused) {
         next = q(NULL, sql_message, *messages, "user", results);
         sqlite3_free(*messages);
         *messages = next;
@@ -467,18 +470,20 @@ static void run(sqlite3_context *ctx, int argc, sqlite3_value **argv)
     dispatch();
 }
 
-static void spawn(const char *target, const char *brief, const char *source, const char *where, const char *shell, const char *model, const char *params)
+static void spawn(sqlite3_stmt *job, const char *where)
 {
     while (waitpid(-1, NULL, WNOHANG) > 0);
     Dl_info self;
     dladdr((void *)spawn, &self);
+    const char *col[6];
+    for (int i = 0; i < 6; i++) col[i] = (const char *)sqlite3_column_text(job, i);
     char *load = sqlite3_mprintf(".load %s", self.dli_fname);
-    char *sql = sqlite3_mprintf("pragma busy_timeout = 999999999; begin immediate; commit; select run(%Q, %Q, key, %Q) from \"%w\" where %s", target, brief, shell, source, where);
+    char *sql = sqlite3_mprintf("pragma busy_timeout = 999999999; begin immediate; commit; select run(%Q, %Q, key, %Q) from \"%w\" where %s", col[1], col[2], col[3], col[0], where);
     if (!fork()) {
         setsid();
         setenv("BRIC_WORKER", "1", 1);
-        if (model) setenv("BRIC_MODEL", model, 1);
-        if (params) setenv("BRIC_PARAMS", params, 1);
+        if (col[4]) setenv("BRIC_MODEL", col[4], 1);
+        if (col[5]) setenv("BRIC_PARAMS", col[5], 1);
         int null = open("/dev/null", O_RDWR);
         for (int fd = 0; fd < 3; fd++) dup2(null, fd);
         execlp(env("BRIC_SQLITE", "sqlite3"), "sqlite3", file, "-cmd", load, sql, (char *)NULL);
@@ -494,18 +499,15 @@ static void dispatch(void)
     char *live = q(NULL, sql_live);
     int free = atoi(env("BRIC_WORKERS", "4")) - atoi(live ? live : "0");
     sqlite3_free(live);
-    sqlite3_stmt *j;
+    sqlite3_stmt *j, *k;
     if (free <= 0 || sqlite3_prepare_v2(L, sql_jobs, -1, &j, NULL)) return;
     while (free > 0 && sqlite3_step(j) == SQLITE_ROW) {
-        const char *source = (const char *)sqlite3_column_text(j, 0);
-        char *sql = sqlite3_mprintf(sql_pending, sqlite3_column_text(j, 2), source, atoi(env("BRIC_ATTEMPTS", "3")), free);
-        sqlite3_stmt *k;
+        char *sql = sqlite3_mprintf(sql_pending, sqlite3_column_text(j, 2), sqlite3_column_text(j, 0), atoi(env("BRIC_ATTEMPTS", "3")), free);
         if (!sqlite3_prepare_v2(L, sql, -1, &k, NULL)) {
-            while (free > 0 && sqlite3_step(k) == SQLITE_ROW) {
+            for (; free > 0 && sqlite3_step(k) == SQLITE_ROW; free--) {
                 char *where = sqlite3_mprintf("\"key\" = %Q", sqlite3_column_text(k, 0));
-                spawn((const char *)sqlite3_column_text(j, 1), (const char *)sqlite3_column_text(j, 2), source, where, (const char *)sqlite3_column_text(j, 3), (const char *)sqlite3_column_text(j, 4), (const char *)sqlite3_column_text(j, 5));
+                spawn(j, where);
                 sqlite3_free(where);
-                free--;
             }
             sqlite3_finalize(k);
         }
@@ -523,7 +525,7 @@ static void hook(void *arg, int op, const char *dbname, const char *table, sqlit
     sqlite3_bind_text(s, 1, table, -1, SQLITE_STATIC);
     if (sqlite3_step(s) == SQLITE_ROW) {
         char *where = sqlite3_mprintf("rowid = %lld", rowid);
-        spawn((const char *)sqlite3_column_text(s, 0), (const char *)sqlite3_column_text(s, 1), table, where, (const char *)sqlite3_column_text(s, 2), (const char *)sqlite3_column_text(s, 3), (const char *)sqlite3_column_text(s, 4));
+        spawn(s, where);
         sqlite3_free(where);
     }
     sqlite3_finalize(s);

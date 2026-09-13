@@ -27,19 +27,21 @@ static const char sql_field[] =
 static const char sql_image[] =
     "select json_array(json_object('type', 'image', 'source', json_object('type', 'base64', 'media_type', ?1, 'data', ?2)))";
 
-static const char sql_job[] =
-    "select target, brief, shell, model, params from bric_job where source = ?1";
+#define SQL_JOBS "select source, target, brief, shell, model, params from bric_job"
 
-static const char sql_jobs[] =
-    "select source, target, brief, shell, model, params from bric_job";
+static const char sql_job[] = SQL_JOBS " where source = ?1";
+
+static const char sql_jobs[] = SQL_JOBS;
 
 static const char sql_kind[] =
     "select kind from bric_log where job = ?1 and key = ?2 and attempt = ?3 and kind in ('close', 'error')";
 
-static const char sql_live[] =
-    "select count(*) from ("
-    " select 1 from bric_log where attempt is not null group by job, key, attempt"
-    " having sum(kind in ('close', 'error')) = 0 and alive(max(iif(kind = 'open', detail ->> 'pid', null))))";
+#define SQL_LIVE \
+    "select count(*) from (" \
+    " select 1 from bric_log where attempt is not null group by job, key, attempt" \
+    " having sum(kind in ('close', 'error')) = 0 and alive(max(iif(kind = 'open', detail ->> 'pid', null))))"
+
+static const char sql_live[] = SQL_LIVE;
 
 static const char sql_log[] =
     "insert into bric_log (job, key, attempt, turn, kind, tool, detail, text, usage)"
@@ -56,9 +58,7 @@ static const char sql_no_call[] =
 static const char sql_open[] =
     "insert or ignore into bric_log (job, key, attempt, turn, kind, detail)"
     " select ?1, ?2, ?3, 0, 'open', json_object('system', ?4, 'pid', ?6, 'tools', json(?7), 'shell', ?8, 'model', ?9, 'params', json(?10))"
-    " where cast(?5 as integer) > (select count(*) from ("
-    " select 1 from bric_log where attempt is not null group by job, key, attempt"
-    " having sum(kind in ('close', 'error')) = 0 and alive(max(iif(kind = 'open', detail ->> 'pid', null)))))";
+    " where cast(?5 as integer) > (" SQL_LIVE ")";
 
 static const char sql_opened[] =
     "select 1 from bric_log where job = ?1 and key = ?2 and attempt = ?3 and kind = 'open'";
