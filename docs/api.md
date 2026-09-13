@@ -48,18 +48,33 @@ Insert a row to register a job:
     insert or replace into bric_job (source, target, brief)
     values ('company', 'company_parent', 'Resolve each operator ...');
 
-From then on, on any connection with the extension loaded, each row
-inserted into `source` gets a worker, `sqlite3 db "select run(target,
-brief, key, shell)"`, that outlives the connection. The worker waits for
-the inserting transaction to commit, and does nothing if it rolls back, so
-a bulk `.import` loses no keys. `shell` NULL means
-`BRIC_SHELL`; `model` NULL means `BRIC_MODEL`, so a cheap model can run
-one job and a strong one another against the same database. `params` is a
-JSON object patched over the request body (`json_patch`), for whatever the
-endpoint takes beyond the model name: `'{"thinking": {"type": "disabled"}}'`
-for deepseek, `'{"output_config": {"effort": "low"}}'` or a `max_tokens`
-for Anthropic. NULL means `BRIC_PARAMS`. Update or delete the row to change or stop the job; the
-change applies to the next insert, not to workers already running.
+From then on a key in `source` with no answer is pending, and pending
+keys get workers, `sqlite3 db "select run(target, brief, key, shell)"`,
+that outlive whatever started them. Work is found by state, not by event:
+the extension looks for pending keys when it is loaded, when a row is
+inserted into `source` on a connection that has it loaded, and when any
+worker finishes. So a trigger on one job's target that inserts into
+another's source chains the two jobs, the model's own inserts included,
+and after a crash or reboot `sqlite3 db ".load bric"` restarts whatever
+was left; nothing needs to run in between. A worker spawned by the hook
+waits for the inserting transaction to commit, and does nothing if it
+rolls back, so a bulk `.import` loses no keys.
+
+A key is pending when it has no `close` row, no live attempt (an `open`
+row whose pid is alive), and fewer than `BRIC_ATTEMPTS` `error` rows; a
+key that has failed that many times stays put, and `select key from
+source except select key from target` lists them. Delete its error rows
+to try again.
+
+`shell` NULL means `BRIC_SHELL`; `model` NULL means `BRIC_MODEL`, so a
+cheap model can run one job and a strong one another against the same
+database. `params` is a JSON object patched over the request body
+(`json_patch`), for whatever the endpoint takes beyond the model name:
+`'{"thinking": {"type": "disabled"}}'` for deepseek,
+`'{"output_config": {"effort": "low"}}'` or a `max_tokens` for Anthropic.
+NULL means `BRIC_PARAMS`. Update or delete the row to change or stop the
+job; the change applies to the next worker, not to workers already
+running.
 The database must be a file: on an in-memory database nothing is
 spawned.
 
@@ -72,7 +87,7 @@ The append-only log, one row per event. `job` is the brief, `key` and
 |-----------|------------------------------------------------------------|
 | `open`    | attempt claimed; `detail` is the system prompt, the tools as sent, the `shell` and the worker `pid` |
 | `reply`   | a model turn; `detail` is its content verbatim, including any thinking |
-| `call`    | a tool call the model made; `tool` and `detail` (arguments; for `sh`, `{"script": ...}`) |
+| `call`    | a tool call the model made; `tool` and `detail` (arguments; for `sh`, `{"command": ...}`) |
 | `receipt` | a tool result; `text` is its squeezed content, `seq` is what a result row cites as its source |
 | `close`   | a row for the key exists in the target; `detail` is that row as JSON |
 | `error`   | the attempt failed; `detail` says why                       |
@@ -147,6 +162,7 @@ Everything is an environment variable, read when `run` is called:
 | `BRIC_PARAMS`       | `{}`                                     | JSON patched over every request body; `bric_job.params` overrides it |
 | `BRIC_URL`          | `https://api.anthropic.com/v1/messages`  | any Anthropic-format messages endpoint            |
 | `BRIC_SHELL`        | `sh`                                     | the sandbox: the command each script is piped into; `run`'s fourth argument and `bric_job.shell` override it |
+| `BRIC_ATTEMPTS`     | `3`                                      | attempts per key before it stops being pending    |
 | `BRIC_TURNS`        | `40`                                     | turns per attempt                                 |
 | `BRIC_WORKERS`      | `4`                                      | attempts live at once; `run` waits for a slot     |
 | `BRIC_SQLITE`       | `sqlite3`                                | the shell workers run in; must be able to `.load` |

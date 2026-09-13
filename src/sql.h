@@ -30,8 +30,16 @@ static const char sql_image[] =
 static const char sql_job[] =
     "select target, brief, shell, model, params from bric_job where source = ?1";
 
+static const char sql_jobs[] =
+    "select source, target, brief, shell, model, params from bric_job";
+
 static const char sql_kind[] =
     "select kind from bric_log where job = ?1 and key = ?2 and attempt = ?3 and kind in ('close', 'error')";
+
+static const char sql_live[] =
+    "select count(*) from ("
+    " select 1 from bric_log where attempt is not null group by job, key, attempt"
+    " having sum(kind in ('close', 'error')) = 0 and alive(max(iif(kind = 'open', detail ->> 'pid', null))))";
 
 static const char sql_log[] =
     "insert into bric_log (job, key, attempt, turn, kind, tool, detail, text, usage)"
@@ -54,6 +62,16 @@ static const char sql_open[] =
 
 static const char sql_opened[] =
     "select 1 from bric_log where job = ?1 and key = ?2 and attempt = ?3 and kind = 'open'";
+
+static const char sql_pending[] =
+    "with a as ("
+    " select key, sum(kind = 'close') as closed, sum(kind = 'error') as errs,"
+    " alive(max(iif(kind = 'open', detail ->> 'pid', null))) as up"
+    " from bric_log where job = %Q and attempt is not null group by key, attempt)"
+    " select s.\"key\" from \"%w\" as s left join a on a.key = s.\"key\""
+    " group by s.\"key\""
+    " having max(coalesce(closed, 0)) = 0 and max(coalesce(closed = 0 and errs = 0 and up, 0)) = 0 and coalesce(sum(errs), 0) < %d"
+    " limit %d";
 
 static const char sql_push[] =
     "select json_insert(?1, '$[#]', json(?2))";
@@ -166,7 +184,7 @@ static const char sql_schema[] =
 
 static const char sql_sh_tool[] =
     "select json_object('name', 'sh',"
-    " 'description', 'run a posix shell script, passed as the argument script. the receipt is stdout and stderr merged, then [exit N] when the status is not zero. '"
+    " 'description', 'run a posix shell script, passed as the argument command. the receipt is stdout and stderr merged, then [exit N] when the status is not zero. '"
     " || 'the working directory is a scratch directory kept for this attempt, so files persist between calls. stdout that is a png or jpeg is shown to you as an image. '"
     " || '`obscura fetch URL --dump markdown --quiet` reads a page through a browser (--dump text|links|html; --screenshot p.png, then `cat p.png` to look at it). '"
     " || '`sqlite3 \"$BRIC_DB\"` is the research database. bric_page is fts5 over every page any attempt here has read'"
@@ -175,7 +193,7 @@ static const char sql_sh_tool[] =
     " || 'your key is the first user message, verbatim. your answer is a row in ' || ?1 || ' with that key: insert it with sqlite3 against the ddl in the system prompt. a constraint or trigger failure is your receipt, so correct and retry. '"
     " || 'a column naming a source takes the seq of the receipt whose own text contains your quote (a bric_page rowid is such a seq; web_search results have none). '"
     " || 'once a row for your key exists at the end of a turn you are done',"
-    " 'input_schema', json_object('type', 'object', 'properties', json_object('script', json_object('type', 'string')), 'required', json_array('script')))";
+    " 'input_schema', json_object('type', 'object', 'properties', json_object('command', json_object('type', 'string')), 'required', json_array('command')))";
 
 static const char sql_usage[] =
     "select json_object('input', ?1 ->> '$.usage.input_tokens', 'output', ?1 ->> '$.usage.output_tokens', 'cache_read', ?1 ->> '$.usage.cache_read_input_tokens')";

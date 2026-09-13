@@ -9,7 +9,7 @@ SQLITE = os.environ.get('SQLITE', 'sqlite3')
 
 
 def sh(id, script):
-    return {'type': 'tool_use', 'id': id, 'name': 'sh', 'input': {'script': script}}
+    return {'type': 'tool_use', 'id': id, 'name': 'sh', 'input': {'command': script}}
 
 
 def insert(id, table, **row):
@@ -127,7 +127,7 @@ def main():
     assert r.stdout == '0|1\n', r.stdout
     r = sqlite("select detail like '%; 1 image % chars', text from bric_log where key = 'acme' and kind = 'receipt' and tool = 'sh' order by seq limit 1 offset 1;")
     assert r.stdout == '1|[image/png, %d bytes]\n' % len(PNG), r.stdout
-    r = sqlite("select detail ->> 'script' from bric_log where key = 'acme' and kind = 'call' and tool = 'sh' order by seq limit 1 offset 3;")
+    r = sqlite("select detail ->> 'command' from bric_log where key = 'acme' and kind = 'call' and tool = 'sh' order by seq limit 1 offset 3;")
     assert r.stdout == 'cat f; sleep 5\n', r.stdout
     r = sqlite("select detail ->> 'parent', detail ->> 'key' from bric_log where key = 'acme' and kind = 'close';")
     assert r.stdout == 'Globex|acme\n', r.stdout
@@ -172,6 +172,31 @@ def main():
     assert {(c['model'], c.get('thinking', {}).get('type')) for c in H.calls if c['messages'][0]['content'].startswith('dyn')} == {('cheap', 'disabled')}, H.calls[-1]
     r = sqlite("select detail ->> 'model', detail -> 'params' from bric_log where key = 'dyn' and kind = 'open';")
     assert r.stdout == 'cheap|{"thinking":{"type":"disabled"}}\n', r.stdout
+
+    def wait(sql, want):
+        for _ in range(100):
+            time.sleep(0.2)
+            r = sqlite(sql)
+            if r.stdout == want:
+                return
+        assert r.stdout == want, r.stdout
+
+    # a plain sqlite3, no extension: nothing runs until something loads it
+    r = sqlite("create trigger chain after insert on results when new.key = 'chain' begin insert into company (key) values ('chain_next'); end;",
+               "insert into company (key) values ('chain'), ('plain');")
+    assert not r.returncode, r.stderr
+    time.sleep(1)
+    r = sqlite("select count(*) from bric_log where (key = 'chain' or key = 'plain' and attempt = 3) and kind = 'open';")
+    assert r.stdout == '0\n', r.stdout
+    r = sqlite(".load ./ext/bric")
+    assert not r.returncode, r.stderr
+    # chain_next was inserted by the model's own sqlite3 and picked up when the chain worker exited
+    wait("select key from results where key like 'chain%' order by key;", 'chain\nchain_next\n')
+    # plain fails every time, and stops being pending at BRIC_ATTEMPTS
+    wait("select count(*) from bric_log where key = 'plain' and kind = 'error';", '3\n')
+    time.sleep(1)
+    r = sqlite(".load ./ext/bric", ".system sleep 1", "select count(*) from bric_log where key = 'plain' and kind in ('open', 'error') and attempt > 3;")
+    assert r.stdout == '0\n', r.stdout
 
     print('ok')
 
