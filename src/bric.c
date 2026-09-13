@@ -293,7 +293,7 @@ static int settled(Attempt *a)
 static void turn(Attempt *a, const char *system, char **messages)
 {
     char *err = NULL;
-    char *body = q(NULL, sql_request, env("BRIC_MODEL", ""), system, a->tools, *messages);
+    char *body = q(NULL, sql_request, env("BRIC_MODEL", ""), system, a->tools, *messages, env("BRIC_PARAMS", "{}"));
     char *reply = infer(body, &err);
     sqlite3_free(body);
     if (!reply) {
@@ -323,7 +323,10 @@ static void turn(Attempt *a, const char *system, char **messages)
         sqlite3_free(logrow(a, "call", name, input, NULL));
         if (!strcmp(name, "sh")) {
             char *script = q(NULL, sql_field, input, "$", "script");
-            char *text = shell(a, script ? script : "", &images);
+            if (!script) script = q(NULL, sql_field, input, "$", "command");
+            if (!script) script = q(NULL, sql_field, input, "$", "cmd");
+            char *text = script ? shell(a, script, &images)
+                : sqlite3_mprintf("error: sh takes {\"script\": \"...\"}, and this call carried %s", input);
             shown = receipt(a, text, images);
             sqlite3_free(script);
             sqlite3_free(images);
@@ -359,6 +362,8 @@ static void turn(Attempt *a, const char *system, char **messages)
 static void schema(void)
 {
     sqlite3_exec(L, sql_schema, NULL, NULL, NULL);
+    sqlite3_exec(L, "alter table bric_job add column model text", NULL, NULL, NULL);
+    sqlite3_exec(L, "alter table bric_job add column params text", NULL, NULL, NULL);
 }
 
 static char **childenv(void)
@@ -396,7 +401,7 @@ static char *attempt(const char *target, const char *brief, const char *key, con
     snprintf(self, sizeof self, "%d", getpid());
     while (!closed && !taken) {
         q(NULL, "begin immediate");
-        q(NULL, sql_open, a.brief, a.key, a.attempt, system, env("BRIC_WORKERS", "4"), self, a.tools, a.shell);
+        q(NULL, sql_open, a.brief, a.key, a.attempt, system, env("BRIC_WORKERS", "4"), self, a.tools, a.shell, env("BRIC_MODEL", ""), env("BRIC_PARAMS", "{}"));
         char *opened = q(NULL, "select changes()");
         q(NULL, "commit");
         rc = !atoi(opened);
@@ -460,7 +465,7 @@ static void run(sqlite3_context *ctx, int argc, sqlite3_value **argv)
     if (kind) sqlite3_result_text(ctx, kind, -1, sqlite3_free);
 }
 
-static void spawn(const char *target, const char *brief, const char *source, sqlite3_int64 rowid, const char *shell)
+static void spawn(const char *target, const char *brief, const char *source, sqlite3_int64 rowid, const char *shell, const char *model, const char *params)
 {
     while (waitpid(-1, NULL, WNOHANG) > 0);
     Dl_info self;
@@ -469,6 +474,8 @@ static void spawn(const char *target, const char *brief, const char *source, sql
     char *sql = sqlite3_mprintf("pragma busy_timeout = 999999999; begin immediate; commit; select run(%Q, %Q, key, %Q) from \"%w\" where rowid = %lld", target, brief, shell, source, rowid);
     if (!fork()) {
         setsid();
+        if (model) setenv("BRIC_MODEL", model, 1);
+        if (params) setenv("BRIC_PARAMS", params, 1);
         int null = open("/dev/null", O_RDWR);
         for (int fd = 0; fd < 3; fd++) dup2(null, fd);
         execlp(env("BRIC_SQLITE", "sqlite3"), "sqlite3", file, "-cmd", load, sql, (char *)NULL);
@@ -486,7 +493,7 @@ static void hook(void *arg, int op, const char *dbname, const char *table, sqlit
     if (sqlite3_prepare_v2(L, sql_job, -1, &s, NULL)) return;
     sqlite3_bind_text(s, 1, table, -1, SQLITE_STATIC);
     if (sqlite3_step(s) == SQLITE_ROW)
-        spawn((const char *)sqlite3_column_text(s, 0), (const char *)sqlite3_column_text(s, 1), table, rowid, (const char *)sqlite3_column_text(s, 2));
+        spawn((const char *)sqlite3_column_text(s, 0), (const char *)sqlite3_column_text(s, 1), table, rowid, (const char *)sqlite3_column_text(s, 2), (const char *)sqlite3_column_text(s, 3), (const char *)sqlite3_column_text(s, 4));
     sqlite3_finalize(s);
 }
 

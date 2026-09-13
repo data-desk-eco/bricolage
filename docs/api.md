@@ -42,7 +42,7 @@ and punctuation and works from any `sqlite3`, including the model's.
 ## `bric_job`
 
 One row per job: `source`, the to-do table (any table with a `key` column,
-and the primary key here), `target`, `brief` and an optional `shell`.
+and the primary key here), `target`, `brief` and optional `shell`, `model` and `params`.
 Insert a row to register a job:
 
     insert or replace into bric_job (source, target, brief)
@@ -53,7 +53,12 @@ inserted into `source` gets a worker, `sqlite3 db "select run(target,
 brief, key, shell)"`, that outlives the connection. The worker waits for
 the inserting transaction to commit, and does nothing if it rolls back, so
 a bulk `.import` loses no keys. `shell` NULL means
-`BRIC_SHELL`. Update or delete the row to change or stop the job; the
+`BRIC_SHELL`; `model` NULL means `BRIC_MODEL`, so a cheap model can run
+one job and a strong one another against the same database. `params` is a
+JSON object patched over the request body (`json_patch`), for whatever the
+endpoint takes beyond the model name: `'{"thinking": {"type": "disabled"}}'`
+for deepseek, `'{"output_config": {"effort": "low"}}'` or a `max_tokens`
+for Anthropic. NULL means `BRIC_PARAMS`. Update or delete the row to change or stop the job; the
 change applies to the next insert, not to workers already running.
 The database must be a file: on an in-memory database nothing is
 spawned.
@@ -138,7 +143,8 @@ Everything is an environment variable, read when `run` is called:
 | variable            | default                                  | what                                              |
 |---------------------|------------------------------------------|---------------------------------------------------|
 | `BRIC_KEY`          |                                          | sent as `x-api-key`                               |
-| `BRIC_MODEL`        |                                          | model name                                        |
+| `BRIC_MODEL`        |                                          | model name; `bric_job.model` overrides it         |
+| `BRIC_PARAMS`       | `{}`                                     | JSON patched over every request body; `bric_job.params` overrides it |
 | `BRIC_URL`          | `https://api.anthropic.com/v1/messages`  | any Anthropic-format messages endpoint            |
 | `BRIC_SHELL`        | `sh`                                     | the sandbox: the command each script is piped into; `run`'s fourth argument and `bric_job.shell` override it |
 | `BRIC_TURNS`        | `40`                                     | turns per attempt                                 |

@@ -156,7 +156,7 @@ def main():
 
     os.environ['BRIC_WORKERS'] = '1'
     r = sqlite(".load ./ext/bric",
-               "insert into bric_job (source, target, brief) values ('company', 'results', 'Resolve each operator to its parent.');",
+               "insert into bric_job (source, target, brief, model, params) values ('company', 'results', 'Resolve each operator to its parent.', 'cheap', '{\"thinking\": {\"type\": \"disabled\"}}');",
                "begin; insert into company (key) values ('undo'); rollback;",
                "begin; insert into company (key) values ('dyn'), ('dyn2');", ".system sleep 1", "commit;",
                "select count(*) from bric_log where key = 'dyn';")
@@ -169,6 +169,9 @@ def main():
     assert r.stdout == 'dyn|Globex\ndyn2|Globex\n', r.stdout
     r = sqlite("select count(distinct attempt) from bric_log where key like 'dyn%';")
     assert r.stdout == '1\n', r.stdout
+    assert {(c['model'], c.get('thinking', {}).get('type')) for c in H.calls if c['messages'][0]['content'].startswith('dyn')} == {('cheap', 'disabled')}, H.calls[-1]
+    r = sqlite("select detail ->> 'model', detail -> 'params' from bric_log where key = 'dyn' and kind = 'open';")
+    assert r.stdout == 'cheap|{"thinking":{"type":"disabled"}}\n', r.stdout
 
     print('ok')
 

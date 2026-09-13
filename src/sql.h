@@ -28,7 +28,7 @@ static const char sql_image[] =
     "select json_array(json_object('type', 'image', 'source', json_object('type', 'base64', 'media_type', ?1, 'data', ?2)))";
 
 static const char sql_job[] =
-    "select target, brief, shell from bric_job where source = ?1";
+    "select target, brief, shell, model, params from bric_job where source = ?1";
 
 static const char sql_kind[] =
     "select kind from bric_log where job = ?1 and key = ?2 and attempt = ?3 and kind in ('close', 'error')";
@@ -47,7 +47,7 @@ static const char sql_no_call[] =
 
 static const char sql_open[] =
     "insert or ignore into bric_log (job, key, attempt, turn, kind, detail)"
-    " select ?1, ?2, ?3, 0, 'open', json_object('system', ?4, 'pid', ?6, 'tools', json(?7), 'shell', ?8)"
+    " select ?1, ?2, ?3, 0, 'open', json_object('system', ?4, 'pid', ?6, 'tools', json(?7), 'shell', ?8, 'model', ?9, 'params', json(?10))"
     " where cast(?5 as integer) > (select count(*) from ("
     " select 1 from bric_log where attempt is not null group by job, key, attempt"
     " having sum(kind in ('close', 'error')) = 0 and alive(max(iif(kind = 'open', detail ->> 'pid', null)))))";
@@ -78,7 +78,7 @@ static const char sql_receipt_shown[] =
     " )";
 
 static const char sql_request[] =
-    "select json_object('model', ?1, 'max_tokens', 8192, 'system', ?2, 'tools', json(?3), 'messages', json(?4))";
+    "select json_patch(json_object('model', ?1, 'max_tokens', 8192, 'system', ?2, 'tools', json(?3), 'messages', json(?4)), ?5)";
 
 static const char sql_result[] =
     "select json_object('type', 'tool_result', 'tool_use_id', ?1, 'content', iif(json_valid(?2), json(?2), ?2))";
@@ -93,7 +93,9 @@ static const char sql_schema[] =
     " source text primary key,"
     " target text not null,"
     " brief  text not null,"
-    " shell  text"
+    " shell  text,"
+    " model  text,"
+    " params text"
     ");"
     " "
     " create table if not exists bric_log ("
@@ -164,7 +166,7 @@ static const char sql_schema[] =
 
 static const char sql_sh_tool[] =
     "select json_object('name', 'sh',"
-    " 'description', 'run a posix shell script. the receipt is stdout and stderr merged, then [exit N] when the status is not zero. '"
+    " 'description', 'run a posix shell script, passed as the argument script. the receipt is stdout and stderr merged, then [exit N] when the status is not zero. '"
     " || 'the working directory is a scratch directory kept for this attempt, so files persist between calls. stdout that is a png or jpeg is shown to you as an image. '"
     " || '`obscura fetch URL --dump markdown --quiet` reads a page through a browser (--dump text|links|html; --screenshot p.png, then `cat p.png` to look at it). '"
     " || '`sqlite3 \"$BRIC_DB\"` is the research database. bric_page is fts5 over every page any attempt here has read'"
