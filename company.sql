@@ -18,10 +18,8 @@ begin
   select raise(abort, 'quote not found in source ' || new.source)
   where not exists (
     select 1
-    from bric_log
-    where
-      seq = new.source and
-      instr(text, squeeze(new.quote))
+    from bric_page('"' || replace(new.quote, '"', '""') || '"')
+    where rowid = new.source
   );
 end;
 

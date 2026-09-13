@@ -4,25 +4,26 @@ Loading the extension adds three functions, three tables and two views.
 The tables are created on `.load`, so a script can insert into `bric_job`
 straight after loading.
 
-## `run(target, brief, key, tools?)`
+## `run(target, brief, key, shell?)`
 
 Runs one research attempt for `key` and inserts the answer into `target`.
 `target` names a table you have created; its DDL, with any `CHECK`
 constraints and triggers, is the contract the model writes against and the
 one SQLite enforces. `brief` is the task in prose, shared by every key in
-the job. `tools` is an optional MCP spec in the same form as `BRIC_TOOLS`. Besides
-the servers' own tools the model always has `web_search`, `submit` and
-`pages`, a full-text search over every receipt in `bric_log`, so an attempt
-can quote a page any earlier attempt read.
+the job. `shell` is the sandbox command, default `BRIC_SHELL`. The model
+has `web_search` and `sh`, and answers by inserting its row with `sqlite3`;
+after every turn the worker checks `target` for a row with this `key`, and
+the first one it finds closes the attempt. See [Shell](#shell) for what
+`sh` is given.
 
 Returns `'close'` when the row was inserted, `'error'` when the model gave
 up, and `NULL` when the attempt did not finish: the key was claimed by
-another worker, the tool server could not be reached, or the turn cap was
-hit. A key that already has a close row returns `'close'` without a model
+another worker, the scratch directory could not be made, or the turn cap
+was hit. A key that already has a close row returns `'close'` without a model
 call, and an attempt whose worker process is gone (`kill -0` on the pid in
 its `open` row) is treated as dead and retried, so a `SELECT run(...)` over
 the whole to-do list is safe to rerun.
-It waits for one of `BRIC_WORKERS` slots before starting a browser. Only
+It waits for one of `BRIC_WORKERS` slots before starting. Only
 callable at the top level of a statement, not from views or triggers.
 
 ## `alive(pid)`
@@ -33,13 +34,14 @@ dead-attempt check and the worker slots.
 ## `squeeze(text)`
 
 Collapses runs of whitespace to one space and strips base64 data URLs. Every
-receipt is stored squeezed, so apply it to a quote before matching it
-against `bric_log.text`, as the trigger in `company.sql` does.
+receipt is stored squeezed. A cite trigger should not need it: a phrase
+query against `bric_page`, as in `company.sql`, ignores whitespace, case
+and punctuation and works from any `sqlite3`, including the model's.
 
 ## `bric_job`
 
 One row per job: `source`, the to-do table (any table with a `key` column,
-and the primary key here), `target`, `brief` and an optional `tools` spec.
+and the primary key here), `target`, `brief` and an optional `shell`.
 Insert a row to register a job:
 
     insert or replace into bric_job (source, target, brief)
@@ -47,8 +49,8 @@ Insert a row to register a job:
 
 From then on, on any connection with the extension loaded, each row
 inserted into `source` gets a worker, `sqlite3 db "select run(target,
-brief, key, tools)"`, that outlives the connection. `tools` NULL means
-`BRIC_TOOLS`. Update or delete the row to change or stop the job; the
+brief, key, shell)"`, that outlives the connection. `shell` NULL means
+`BRIC_SHELL`. Update or delete the row to change or stop the job; the
 change applies to the next insert, not to workers already running.
 The database must be a file: on an in-memory database nothing is
 spawned.
@@ -60,23 +62,36 @@ The append-only log, one row per event. `job` is the brief, `key` and
 
 | `kind`    | what                                                       |
 |-----------|------------------------------------------------------------|
-| `open`    | attempt claimed; `detail` is the system prompt, tool spec and worker `pid` |
+| `open`    | attempt claimed; `detail` is the system prompt, the tools as sent, the `shell` and the worker `pid` |
 | `reply`   | a model turn; `detail` is its content verbatim, including any thinking |
-| `call`    | a tool call the model made; `tool` and `detail` (arguments) |
+| `call`    | a tool call the model made; `tool` and `detail` (arguments; for `sh`, `{"script": ...}`) |
 | `receipt` | a tool result; `text` is its squeezed content, `seq` is what a result row cites as its source |
-| `stderr`  | what the worker and its browser wrote to stderr since the last row, if anything |
-| `close`   | the row was inserted; `detail` is the submission            |
+| `close`   | a row for the key exists in the target; `detail` is that row as JSON |
 | `error`   | the attempt failed; `detail` says why                       |
 
 `usage` holds the token counts per turn as JSON. A partial unique index
 over `(job, key, attempt)` for `open`, `close` and `error` is the claim:
-two workers cannot open the same attempt.
+two workers cannot open the same attempt. Triggers refuse every update and
+delete, so the log is append-only for the model, which can reach it from
+its shell, and for you; drop `bric_log_update` and `bric_log_delete` to
+prune.
 
 ## `bric_page`
 
-FTS5 over `bric_log.text`, filled by trigger as receipts are stored. This is
-what the `pages` tool queries; `select * from bric_page where bric_page
-match 'x'` works from the shell too.
+FTS5 over `bric_log.text`, filled by trigger as receipts are stored.
+`select rowid, snippet(bric_page, 0, '', '', ' ... ', 48) from bric_page
+where bric_page match 'x'` finds every page any attempt has read, and the
+rowid is a `seq` a result row may cite. The model runs this through
+`sqlite3` in its shell; so can you. It is also the cite check: a result
+table's trigger asks whether the quote is a phrase on the cited receipt,
+
+    where not exists (
+      select 1 from bric_page('"' || replace(new.quote, '"', '""') || '"')
+      where rowid = new.source
+    )
+
+using the table-valued form, which the `sqlite3` shell allows inside a
+trigger where the `match` operator is refused as unsafe.
 
 ## `bric_attempt`
 
@@ -92,6 +107,27 @@ receipts as `tool_result` blocks. Together with the `open` row's system
 prompt and tools this is the whole request, so any attempt can be replayed
 or resumed. Images are not kept.
 
+## Shell
+
+Each `sh` call is one process: `sh -c "cd <dir> && $BRIC_SHELL"` with the
+script on stdin, stdout and stderr merged into the receipt, and `[exit N]`
+appended when the status is not zero. `<dir>` is a scratch directory made
+for the attempt under `TMPDIR` and removed when it ends. The environment
+is the worker's minus every `BRIC_*` variable, so the API key is not in
+the sandbox, plus `BRIC_DB`, the database's path. The model reads and
+writes the database through `sqlite3 "$BRIC_DB"`, so the sandbox must be
+able to open that path for writing, journal files included. The `sqlite3`
+shell has no busy timeout, so a write that lands while a worker is logging
+fails with `database is locked`; that is a receipt like any other and the
+model retries, or the brief can suggest `-cmd '.timeout 10000'`. Output that begins with
+a PNG or JPEG header is sent to the model as an image; output with a NUL
+byte in it is reported by size only. After `BRIC_TIMEOUT` seconds, or 4
+MiB of output, the process group is killed and the receipt says so.
+Anything that escapes the process group, such as a container the client
+was detached from, is the sandbox command's to stop. Calls in one model
+turn run one after another, so files written by the first are there for
+the second.
+
 ## Configuration
 
 Everything is an environment variable, read when `run` is called:
@@ -101,9 +137,8 @@ Everything is an environment variable, read when `run` is called:
 | `BRIC_KEY`          |                                          | sent as `x-api-key`                               |
 | `BRIC_MODEL`        |                                          | model name                                        |
 | `BRIC_URL`          | `https://api.anthropic.com/v1/messages`  | any Anthropic-format messages endpoint            |
-| `BRIC_TOOLS`        | `browser`                                | MCP servers: a URL, a JSON array of URLs, or a JSON object of URL to allowed tool names; `run`'s fourth argument overrides it. The entry `browser` (or `obscura`) is a browser started for the attempt. A tool name offered by two servers fails the attempt |
-| `BRIC_BROWSER`      | `obscura mcp --http`                     | the browser command; `run` appends `--port N`     |
+| `BRIC_SHELL`        | `sh`                                     | the sandbox: the command each script is piped into; `run`'s fourth argument and `bric_job.shell` override it |
 | `BRIC_TURNS`        | `40`                                     | turns per attempt                                 |
 | `BRIC_WORKERS`      | `4`                                      | attempts live at once; `run` waits for a slot     |
 | `BRIC_SQLITE`       | `sqlite3`                                | the shell workers run in; must be able to `.load` |
-| `BRIC_TIMEOUT`      | `120`                                    | seconds per HTTP call                              |
+| `BRIC_TIMEOUT`      | `120`                                    | seconds per HTTP call and per shell call           |
