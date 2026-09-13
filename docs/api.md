@@ -127,9 +127,15 @@ trigger where the `match` operator is refused as unsafe.
 
 ## `bric_attempt`
 
-One row per `(job, key)`: the last log row's `kind`, `turn`, `ts`, `tool`
-and `detail`, with summed `input`, `output` and `cache_read` tokens. This
-is the progress and cost view.
+One row per `(job, key)`, the progress and cost board: the last log row's
+`attempt`, `turn`, `ts`, `kind`, `tool` and `detail`, `age` in seconds
+since it, and over the key's whole log `calls`, `images` sent, and summed
+`input`, `output` and `cache_read` tokens. `input + cache_read` is what the
+model has read; a key whose `age` grows with `kind` still `call` or
+`receipt` has a worker stuck in a shell call. To tail the log itself,
+`seq` is monotonic:
+
+    last=0; while :; do sqlite3 db "select seq, key, turn, kind, substr(detail, 1, 100) from bric_log where seq > $last"; last=$(sqlite3 db "select max(seq) from bric_log"); sleep 5; done
 
 ## `bric_transcript`
 

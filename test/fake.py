@@ -126,8 +126,8 @@ def main():
     assert r.stdout == 'reply without submission: no idea\n', r.stdout
     r = sqlite("select count(*) from bric_page where bric_page match 'globex' and rowid in (select seq from bric_log where key = 'acme' and tool = 'sh');")
     assert r.stdout == '1\n', r.stdout
-    r = sqlite("select kind, input, output from bric_attempt where key = 'acme';")
-    assert r.stdout == 'close|40|20\n', r.stdout
+    r = sqlite("select kind, input, output, calls, images, age < 60 from bric_attempt where key = 'acme';")
+    assert r.stdout == 'close|40|20|7|1|1\n', r.stdout
     r = sqlite("select json_array_length(detail -> 'tools'), detail ->> 'shell', detail -> 'tools' ->> '$[1].name' from bric_log where key = 'acme' and kind = 'open';")
     assert r.stdout == '2|sh|sh\n', r.stdout
     r = sqlite("select instr(text, '  '), detail like '%chars: Acme Ltd is a wholly owned' from bric_log where key = 'acme' and kind = 'receipt' and tool = 'sh' order by seq limit 1;")
