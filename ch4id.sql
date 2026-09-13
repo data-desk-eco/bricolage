@@ -61,9 +61,10 @@ insert or replace into bric_job (source, target, brief) values (
   'plume_source',
   'Attribute one methane plume to the most likely source.
 
-The key is a detection id. It has the archive''s own prefix: a Carbon Mapper
-record is bare, as in `tan20250101t113529c00s4001-A`; the others carry their
-provider, as in `IMEO:344d38d9-...` or `SRON:20250911:62.92N:75.21E`.
+The key is the `id` of one row of `views/plumes`, verbatim, and `src` there
+says who detected it: a Carbon Mapper id looks like
+`tan20250101t113529c00s4001-A`, an IMEO id is a bare uuid, an SRON id is
+`sron_20230304_32.20N_93.35W`, a Data Desk id starts `DD:`. Read your row first.
 
 ## The archive
 
@@ -71,13 +72,18 @@ DuckDB is on the path and the archive is public object storage. Read it
 straight off the bucket: there is nothing to download and no credentials.
 
 ```sh
-duckdb -c "
+duckdb -csv archive.db "
 install httpfs; load httpfs; install spatial; load spatial;
-set allow_asterisks_in_http_paths = true;
 create or replace macro bucket(p) as
     ''https://s3.WAW3-2.cloudferro.com/data-desk-archive/'' || p;
 select * from read_parquet(bucket(''views/plumes/data.parquet'')) limit 5"
 ```
+
+`archive.db` in the working directory keeps the macro and the loaded
+extensions between calls, so later calls are just `duckdb -csv archive.db
+"select ..."`. Always `-csv` or `-json`: the default table output is boxes and
+colour codes that waste your context. Work in the directory you start in;
+it is yours and is cleared when you finish.
 
 Four tables answer almost everything:
 
@@ -96,9 +102,10 @@ Four tables answer almost everything:
 
 Anything under `views/` is the archive''s considered output and is the thing to
 use. The per-provider records underneath it (`carbon-mapper/plumes`,
-`imeo/plumes`, `sron/plumes`, `data-desk/plumes`, each partitioned
-`year=*/data.parquet`) are the raw feeds, useful when you want a source''s own
-fields rather than the archive''s flattened view.
+`imeo/plumes`, `sron/plumes`, `data-desk/plumes`, one file per year as
+`imeo/plumes/year=2025/data.parquet`) are the raw feeds, useful when you want a
+source''s own fields rather than the archive''s flattened view. Name the year:
+the bucket does not answer a `year=*` glob.
 
 Two rules about size. The features table is 15 million rows spread over four
 datasets: filter by bounding box *before* you measure distance, or a query reads
@@ -122,14 +129,19 @@ which of two neighbours the plume sits on. A picture does. Get one with `curl`
 and display it by writing the bytes to stdout:
 
 ```sh
-cd /tmp && curl -sS -o a.png "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/export?bbox=39.32,53.78,39.40,53.83&bboxSR=4326&imageSR=4326&size=1200,1200&format=png&f=image"
+curl -sS -o a.png "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/export?bbox=39.32,53.78,39.40,53.83&bboxSR=4326&imageSR=4326&size=1200,1200&format=jpg&f=image"
 cat a.png
 ```
 
-That is a 1200-pixel square of satellite imagery with north up. Vary the bbox to
+That is a 1200-pixel square of satellite imagery with north up. The picture is
+shown to you only when it is the whole of the output, so `cat` it on its own,
+not after an `ls`. A jpeg at 1200 pixels is a few hundred kilobytes; a png at
+2000 is megabytes and may be cut before it reaches you. Each picture is
+shown to you once, when it is fresh: look properly, and say what you see
+before you move on. Vary the bbox to
 frame what you want: four decimals is about 11 metres, and the square is on the
 ground when the width in degrees is the height times the cosine of the latitude.
-The `size` caps at 4096. Everything in the archive is public, so `curl` with no
+The `size` caps at 4096; you never need more than 1500. Everything in the archive is public, so `curl` with no
 credentials is also how you read a `link` or an `overlay` path.
 
 **Treat the scratch directory as a small one.** Downloading the archive''s

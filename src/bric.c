@@ -145,7 +145,7 @@ static char *infer(const char *body, char **err)
 typedef struct {
     const char *target, *brief, *key, *shell;
     char *attempt, *usage, *row, *tools, *dir, **envp;
-    int turn, done;
+    int turn, turns, done;
 } Attempt;
 
 static char *logrow(Attempt *a, const char *kind, const char *tool, const char *detail, const char *text)
@@ -253,7 +253,7 @@ static char *shell(Attempt *a, const char *script, char **images)
     int status = 0;
     waitpid(pid, &status, 0);
     int code = WIFEXITED(status) ? WEXITSTATUS(status) : WIFSIGNALED(status) ? 128 + WTERMSIG(status) : -1;
-    const char *mime = b.n > 4 && !memcmp(b.out, "\x89PNG", 4) ? "image/png"
+    const char *mime = cut ? NULL : b.n > 4 && !memcmp(b.out, "\x89PNG", 4) ? "image/png"
                      : b.n > 3 && !memcmp(b.out, "\xff\xd8\xff", 3) ? "image/jpeg" : NULL;
     char *text;
     if (mime) {
@@ -262,7 +262,7 @@ static char *shell(Attempt *a, const char *script, char **images)
         sqlite3_free(data);
         text = sqlite3_mprintf("[%s, %lld bytes]", mime, (long long)b.n);
     } else if (memchr(b.out, 0, b.n)) {
-        text = sqlite3_mprintf("[%lld bytes of binary output]", (long long)b.n);
+        text = sqlite3_mprintf("[%lld bytes of binary output: stdout is shown as an image only when it is one png or jpeg, whole and alone]", (long long)b.n);
     } else {
         text = b.out;
         b.out = NULL;
@@ -352,7 +352,13 @@ static void turn(Attempt *a, const char *system, char **messages)
         sqlite3_free(text);
     }
     if (!a->done && !paused) {
-        next = q(NULL, sql_message, *messages, "user", results);
+        char left[16];
+        snprintf(left, sizeof left, "%d", a->turns - a->turn);
+        char *nudged = a->turns - a->turn <= 3 ? q(NULL, sql_nudge, results, left, a->target) : NULL;
+        char *kept = q(NULL, sql_forget, *messages);
+        next = q(NULL, sql_message, kept, "user", nudged ? nudged : results);
+        sqlite3_free(kept);
+        sqlite3_free(nudged);
         sqlite3_free(*messages);
         *messages = next;
     }
@@ -429,8 +435,8 @@ static char *attempt(const char *target, const char *brief, const char *key, con
         char *quoted = q(NULL, sql_quote, a.key);
         char *messages = q(NULL, sql_message, "[]", "user", quoted);
         sqlite3_free(quoted);
-        int turns = atoi(env("BRIC_TURNS", "40"));
-        for (a.turn = 1; a.turn <= turns && !a.done; a.turn++) turn(&a, system, &messages);
+        a.turns = atoi(env("BRIC_TURNS", "40"));
+        for (a.turn = 1; a.turn <= a.turns && !a.done; a.turn++) turn(&a, system, &messages);
         if (!a.done) sqlite3_free(logrow(&a, "error", NULL, "turn cap", NULL));
         sqlite3_free(messages);
     }

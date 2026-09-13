@@ -37,7 +37,7 @@ def wait(keys, seconds=1800):
 
 
 PICKS = {
-    'imeo-turkmenistan': 'IMEO:057cf5aa-dab7-46fa-825a-83a92a9c2c03',
+    'imeo-emit': 'ae87ae10-a948-42c3-ba96-248157db65fe',
     'cm-tanager-waste': 'tan20250101t113529c00s4001-A',
     'dd-aerial-satellite': 'DD:aoi:S2B_40SBJ_20241025_0_L1C:plume-1',
     'dd-barrow-pipeline': 'DD:pipeline-barrow:S2A_30UVE_20260314_1_L1C:plume-1',

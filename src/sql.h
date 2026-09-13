@@ -24,6 +24,14 @@ static const char sql_dead[] =
 static const char sql_field[] =
     "select ?1 -> ?2 ->> ?3";
 
+static const char sql_forget[] =
+    "select json_group_array(json(iif(m.value ->> 'role' = 'user' and json_type(m.value, '$.content') = 'array',"
+    " json_object('role', 'user', 'content', (select json_group_array(json(iif(json_type(r.value, '$.content') = 'array',"
+    " json_set(r.value, '$.content', (select json_group_array(json(iif(c.value ->> 'type' = 'image',"
+    " json_object('type', 'text', 'text', '[an image, shown when it was fresh; run the command again to see it]'), c.value)))"
+    " from json_each(r.value, '$.content') as c)), r.value))) from json_each(m.value, '$.content') as r)), m.value)))"
+    " from json_each(?1) as m";
+
 static const char sql_image[] =
     "select json_array(json_object('type', 'image', 'source', json_object('type', 'base64', 'media_type', ?1, 'data', ?2)))";
 
@@ -54,6 +62,10 @@ static const char sql_message[] =
 static const char sql_no_call[] =
     "select 'reply without submission: ' || coalesce(group_concat(value ->> 'text', char(10)), ?1 ->> '$.stop_reason')"
     " from json_each(?1, '$.content') where value ->> 'type' = 'text'";
+
+static const char sql_nudge[] =
+    "select json_insert(?1, '$[#]', json_object('type', 'text', 'text',"
+    " ?2 || ' turns left. insert your row into ' || ?3 || ' now, at whatever confidence the evidence supports'))";
 
 static const char sql_open[] =
     "insert or ignore into bric_log (job, key, attempt, turn, kind, detail)"
