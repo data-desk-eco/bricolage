@@ -19,7 +19,9 @@ create table if not exists terminal_party (
   run_at     text default (datetime('now')),
   primary key (key, role, company),
   constraint "scope is a phrase, not a paragraph"
-    check (scope is null or length(scope) <= 120)
+    check (scope is null or length(scope) <= 120),
+  constraint "one company per row"
+    check (company not like '%,%' and company not like '% and %')
 );
 
 create trigger if not exists terminal_party_cite
@@ -40,7 +42,7 @@ insert or replace into bric_job (source, target, brief, skills) values (
 name as the industry knows it, e.g. `Rio Grande LNG` or `Golden Pass`. Read
 `web` before your first search.
 
-Insert one row per company and role: the owner and operator, the FEED and
+Insert one row per company and role, a syndicate as one row a bank: the owner and operator, the FEED and
 EPC contractors, the liquefaction technology licensor, and the suppliers of
 the main equipment (gas turbines, compressors, main cryogenic heat
 exchangers, storage tanks) and marine works. `scope` says which trains or
