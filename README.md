@@ -24,7 +24,8 @@ are on the path of the shell you give them.
 
 ## Quick start
 
-`company.sql` resolves operators to their parent companies. Loading it
+`company.sql` resolves operators to their parent companies (`lng.sql` maps
+the owner, FEED, EPC and equipment suppliers of an LNG terminal). Loading it
 creates the `company` to-do table and the `company_parent` result table,
 and inserts the job into `bric_job`, so that inserting a key is what
 starts an agent:
