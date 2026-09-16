@@ -201,7 +201,7 @@ static const char sql_sh_tool[] =
     " || ' bric_log holds the full text of any receipt (`select text from bric_log where seq = N`). a receipt over 20000 characters is cut; page it from bric_log or narrow the script''s output. '"
     " || 'your key is the first user message, verbatim. your answer is a row in ' || ?1 || ' with that key: insert it with `db` against the ddl in the system prompt. a constraint or trigger failure is your receipt, so correct and retry. '"
     " || 'a column naming a source takes the seq of the receipt whose own text contains your quote (a bric_page rowid is such a seq; web_search results have none). '"
-    " || 'once a row for your key exists at the end of a turn you are done',"
+    " || 'the first turn that ends with a row for your key closes the attempt, so a many-row answer is one insert statement in one turn: check each quote against bric_page first',"
     " 'input_schema', json_object('type', 'object', 'properties', json_object('command', json_object('type', 'string')), 'required', json_array('command')))";
 
 static const char sql_usage[] =

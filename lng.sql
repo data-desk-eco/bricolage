@@ -69,7 +69,7 @@ begin
   );
 end;
 
-insert or replace into bric_job (source, target, brief, skills) values (
+insert or replace into bric_job (source, target, brief, skills, params) values (
   'coast',
   'coast_terminal',
   'You list the LNG export terminals of one country or coast. The key is the
@@ -77,18 +77,22 @@ place, e.g. `Mozambique` or `US Gulf Coast`. Read `web` before your first
 search.
 
 Insert one row per liquefaction project that is operating, under
-construction, past final investment decision or seriously proposed, floating
-ones included; import terminals are not wanted. `terminal` is the project''s
-name as the industry knows it, e.g. `Rio Grande LNG` or `Coral South FLNG`.
-Prefer a regulator''s list, an industry body''s tracker or the operator''s
-own page over a news roundup. Insert every row in one statement.
+construction, past final investment decision or proposed with a named
+developer, floating ones included; import terminals are not wanted.
+`terminal` is the project''s name as the industry knows it, e.g. `Rio Grande
+LNG` or `Coral South FLNG`. Start from a tracker that lists them all (Global
+Energy Monitor''s LNG terminal tracker, GIIGNL''s annual report, the IGU
+world LNG report, a regulator''s project list) and confirm each on its
+own page. A coast with many projects is still one list: insert every row in
+one statement, in one turn, and expect twenty rows for a large exporter.
 
 `source` is the receipt of the page you read it on and `quote` is a phrase
 from that page naming the terminal, exactly as printed.',
-  './skills/web'
+  './skills/web',
+  '{"max_tokens": 16384}'
 );
 
-insert or replace into bric_job (source, target, brief, skills) values (
+insert or replace into bric_job (source, target, brief, skills, params) values (
   'terminal',
   'terminal_party',
   'You map who is building one LNG export terminal. The key is the terminal''s
@@ -104,6 +108,10 @@ the operator''s own page or a regulator''s filing over a news roundup.
 
 `source` is the receipt of the page you read it on and `quote` is a phrase
 from that page naming the company in that role, exactly as printed. A role
-you cannot find is left out; a low-confidence row says why in `scope`.',
-  './skills/web'
+you cannot find is left out; a low-confidence row says why in `scope`.
+The first turn that ends with a row for your key closes the attempt, so
+gather every role first, check each quote against `bric_page`, then insert
+all your rows in one statement.',
+  './skills/web',
+  '{"max_tokens": 16384}'
 );
