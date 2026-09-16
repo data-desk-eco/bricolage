@@ -576,13 +576,18 @@ static char *attempt(const char *target, const char *brief, const char *key, con
     char self[16];
     snprintf(self, sizeof self, "%d", getpid());
     while (a.dir && !closed && !taken) {
-        q(NULL, "begin immediate");
-        q(NULL, sql_open, a.brief, a.key, a.attempt, system, env("BRIC_WORKERS", "4"), self, a.tools, a.shell, env("BRIC_MODEL", ""), env("BRIC_PARAMS", "{}"));
-        char *opened = q(NULL, "select changes()");
-        q(NULL, "commit");
-        rc = !atoi(opened);
-        sqlite3_free(opened);
-        if (!rc) break;
+        char *live = q(NULL, sql_live);
+        int full = atoi(live ? live : "0") >= atoi(env("BRIC_WORKERS", "4"));
+        sqlite3_free(live);
+        if (!full) {
+            q(NULL, "begin immediate");
+            q(NULL, sql_open, a.brief, a.key, a.attempt, system, env("BRIC_WORKERS", "4"), self, a.tools, a.shell, env("BRIC_MODEL", ""), env("BRIC_PARAMS", "{}"));
+            char *opened = q(NULL, "select changes()");
+            q(NULL, "commit");
+            rc = !atoi(opened);
+            sqlite3_free(opened);
+            if (!rc) break;
+        }
         char *t = q(NULL, sql_opened, a.brief, a.key, a.attempt);
         taken = t != NULL;
         sqlite3_free(t);
@@ -706,7 +711,7 @@ int sqlite3_bric_init(sqlite3 *db, char **err, const sqlite3_api_routines *api)
     file = file && *file ? sqlite3_mprintf("%s", file) : NULL;
     L = db;
     if (file && sqlite3_open(file, &L) == SQLITE_OK) {
-        sqlite3_busy_timeout(L, 30000);
+        sqlite3_busy_timeout(L, 999999999);
         sqlite3_exec(L, "pragma journal_mode = wal", NULL, NULL, NULL);
         schema();
         sqlite3_update_hook(db, hook, NULL);
