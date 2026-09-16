@@ -14,7 +14,9 @@ create table if not exists coast_terminal (
   ),
   source     integer not null,
   quote      text not null,
-  primary key (key, terminal)
+  primary key (key, terminal),
+  constraint "a plant, named as the industry names it"
+    check (terminal not like '% Terminal' and terminal not like '% Train %')
 );
 
 create trigger if not exists coast_terminal_cite

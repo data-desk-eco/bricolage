@@ -111,7 +111,7 @@ prune.
 
 ## `bric_page`
 
-FTS5 over `bric_log.text`, filled by trigger as receipts are stored.
+FTS5 over `bric_receipt`, the log's rows that have text, filled by trigger as receipts are stored; a scan of `bric_page` shows receipts only, not every log row.
 `select rowid, snippet(bric_page, 0, '', '', ' ... ', 48) from bric_page
 where bric_page match 'x'` finds every page any attempt has read, and the
 rowid is a `seq` a result row may cite. The model runs this through
