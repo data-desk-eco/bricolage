@@ -710,6 +710,7 @@ int sqlite3_bric_init(sqlite3 *db, char **err, const sqlite3_api_routines *api)
         sqlite3_exec(L, "pragma journal_mode = wal", NULL, NULL, NULL);
         schema();
         sqlite3_update_hook(db, hook, NULL);
+        sqlite3_update_hook(L, hook, NULL);
     }
     sqlite3_create_function(L, "alive", 1, SQLITE_UTF8, NULL, alive, NULL, NULL);
     sqlite3_create_function(L, "squeeze", 1, SQLITE_UTF8 | SQLITE_DETERMINISTIC, NULL, squeeze_fn, NULL, NULL);

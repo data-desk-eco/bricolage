@@ -15,7 +15,7 @@ create table if not exists company_parent (
 create trigger if not exists company_parent_cite
 before insert on company_parent
 begin
-  select raise(abort, 'quote not found in source ' || new.source)
+  select raise(abort, 'quote not found in source')
   where not exists (
     select 1
     from bric_page('"' || replace(new.quote, '"', '""') || '"')
