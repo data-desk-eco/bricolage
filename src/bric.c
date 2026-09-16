@@ -175,7 +175,12 @@ static char *receipt(Attempt *a, char *text, const char *images)
     char *detail = q(NULL, sql_receipt_detail, text, images);
     char *seq = logrow(a, "receipt", "sh", detail, text);
     sqlite3_free(detail);
-    char *shown = q(NULL, sql_receipt_shown, seq, text, "20000", images);
+    if (!seq) {
+        sqlite3_free(text);
+        text = sqlite3_mprintf("receipt not stored: %s", sqlite3_errmsg(L));
+        seq = logrow(a, "receipt", "sh", text, text);
+    }
+    char *shown = q(NULL, sql_receipt_shown, seq ? seq : "?", text, "20000", images);
     sqlite3_free(seq);
     sqlite3_free(text);
     return shown;
