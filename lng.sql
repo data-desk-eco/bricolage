@@ -80,7 +80,8 @@ Insert one row per liquefaction project that is operating, under
 construction, past final investment decision or proposed with a named
 developer, floating ones included; import terminals are not wanted.
 `terminal` is the project''s name as the industry knows it, e.g. `Rio Grande
-LNG` or `Coral South FLNG`. Start from a tracker that lists them all (Global
+LNG` or `Coral South FLNG`, without a tracker''s suffix like `Terminal`; a
+new train or phase of an existing plant is that plant''s row, not its own. Start from a tracker that lists them all (Global
 Energy Monitor''s LNG terminal tracker, GIIGNL''s annual report, the IGU
 world LNG report, a regulator''s project list) and confirm each on its
 own page. A coast with many projects is still one list: insert every row in
