@@ -19,7 +19,8 @@ create table if not exists coast_terminal (
     check (terminal not like '% Terminal' and terminal not like '% Train %')
 );
 
-create trigger if not exists coast_terminal_cite
+drop trigger if exists coast_terminal_cite;
+create trigger coast_terminal_cite
 before insert on coast_terminal
 begin
   select raise(abort, 'quote not found in source')
@@ -28,6 +29,8 @@ begin
     from bric_page('"' || replace(new.quote, '"', '""') || '"')
     where rowid = new.source
   );
+  select raise(abort, 'source is not a page: cite the receipt `page URL` printed, which starts with its url')
+  where (select url from bric_receipt where seq = new.source) is null;
 end;
 
 create table if not exists terminal (key text primary key);
@@ -60,7 +63,8 @@ create table if not exists terminal_party (
     check (company not like '%,%' and company not like '% and %')
 );
 
-create trigger if not exists terminal_party_cite
+drop trigger if exists terminal_party_cite;
+create trigger terminal_party_cite
 before insert on terminal_party
 begin
   select raise(abort, 'quote not found in source')
@@ -69,6 +73,8 @@ begin
     from bric_page('"' || replace(new.quote, '"', '""') || '"')
     where rowid = new.source
   );
+  select raise(abort, 'source is not a page: cite the receipt `page URL` printed, which starts with its url')
+  where (select url from bric_receipt where seq = new.source) is null;
 end;
 
 insert or replace into bric_job (source, target, brief, skills, params) values (

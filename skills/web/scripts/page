@@ -1,6 +1,8 @@
 #!/bin/sh
-# page URL [text|markdown|links|html|shot] — one web page read through a browser; shot prints a png
-case ${2:-text} in
-  shot) exec obscura fetch "$1" --screenshot /dev/stdout --quiet ;;
-  *) exec obscura fetch "$1" --dump "${2:-text}" --quiet ;;
+# page URL [text|markdown|links|html|shot] — one web page read through a browser, or a pdf's text; shot prints a png.
+# the url is the first line printed, so a receipt says what page it is: bric_receipt.url
+case ${2:-text}$1 in
+  shot*) exec obscura fetch "$1" --screenshot /dev/stdout --quiet ;;
+  *.pdf|*.pdf\?*) echo "$1"; curl -sL "$1" | pdftotext -layout - - ;;
+  *) echo "$1"; exec obscura fetch "$1" --dump "${2:-text}" --quiet ;;
 esac

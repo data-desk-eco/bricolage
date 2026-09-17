@@ -112,6 +112,10 @@ prune.
 ## `bric_page`
 
 FTS5 over `bric_receipt`, the log's rows that have text, filled by trigger as receipts are stored; a scan of `bric_page` shows receipts only, not every log row.
+`bric_receipt` is `(seq, text, url)`: `url` is the receipt's first line when
+that is a url, which is what `page URL` prints, so a cited row's page is one
+join, `select p.*, r.url from terminal_party p join bric_receipt r on r.seq = p.source`,
+and `lng.sql` refuses a source whose `url` is null.
 `select rowid, snippet(bric_page, 0, '', '', ' ... ', 48) from bric_page
 where bric_page match 'x'` finds every page any attempt has read, and the
 rowid is a `seq` a result row may cite. The model runs this through

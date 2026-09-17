@@ -437,6 +437,9 @@ static void turn(Attempt *a, const char *system, char **messages)
 static void schema(void)
 {
     sqlite3_exec(L, sql_schema, NULL, NULL, NULL);
+    if (sqlite3_exec(L, "select url from bric_receipt limit 0", NULL, NULL, NULL)
+        && !sqlite3_exec(L, "drop view bric_receipt", NULL, NULL, NULL))
+        sqlite3_exec(L, sql_schema, NULL, NULL, NULL);
     sqlite3_exec(L, "alter table bric_job add column model text", NULL, NULL, NULL);
     sqlite3_exec(L, "alter table bric_job add column params text", NULL, NULL, NULL);
     sqlite3_exec(L, "alter table bric_job add column skills text", NULL, NULL, NULL);

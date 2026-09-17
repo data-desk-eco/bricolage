@@ -1,7 +1,7 @@
 import json, os, subprocess, sys, threading, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-PAGE = 'Acme Ltd   is a wholly owned\n\n\tsubsidiary of   Globex Corporation. ' + 'filler text. ' * 3000
+PAGE = 'https://example.org/acme\nAcme Ltd   is a wholly owned\n\n\tsubsidiary of   Globex Corporation. ' + 'filler text. ' * 3000
 QUOTE = 'wholly owned\nsubsidiary of Globex Corporation'
 PNG = bytes.fromhex('89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d4944415478da63f8cfc0f01f0005000201cae1a5d90000000049454e44ae426082')
 PNG64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP4z8DwHwAFAAIByuGl2QAAAABJRU5ErkJggg=='
@@ -130,8 +130,10 @@ def main():
     assert r.stdout == 'close|40|20|7|1|1\n', r.stdout
     r = sqlite("select json_array_length(detail -> 'tools'), detail ->> 'shell', detail -> 'tools' ->> '$[1].name' from bric_log where key = 'acme' and kind = 'open';")
     assert r.stdout == '2|sh|sh\n', r.stdout
-    r = sqlite("select instr(text, '  '), detail like '%chars: Acme Ltd is a wholly owned' from bric_log where key = 'acme' and kind = 'receipt' and tool = 'sh' order by seq limit 1;")
+    r = sqlite("select instr(text, '  '), detail like '%chars: https://example.org/acme' from bric_log where key = 'acme' and kind = 'receipt' and tool = 'sh' order by seq limit 1;")
     assert r.stdout == '0|1\n', r.stdout
+    r = sqlite("select group_concat(ifnull(url, '-')) from (select url from bric_receipt join bric_log using (seq) where key = 'acme' and kind = 'receipt' order by seq limit 2);")
+    assert r.stdout == 'https://example.org/acme,-\n', r.stdout
     r = sqlite("select detail like '%; 1 image % chars', text from bric_log where key = 'acme' and kind = 'receipt' and tool = 'sh' order by seq limit 1 offset 1;")
     assert r.stdout == '1|[image/png, %d bytes]\n' % len(PNG), r.stdout
     r = sqlite("select detail ->> 'command' from bric_log where key = 'acme' and kind = 'call' and tool = 'sh' order by seq limit 1 offset 3;")

@@ -10,6 +10,11 @@ The web search tool finds pages; a page is read with
     page https://example.org/permit/1234 markdown   # text with the links
     page https://example.org/permit/1234 links      # the links alone
     page https://example.org/permit/1234 shot       # a png of it, shown to you
+    page https://example.org/permit/1234.pdf        # a pdf's text
+
+`page` prints the url as its first line, which is how a receipt says what
+page it is. Cite that receipt: one page per call, and not the receipt of a
+saved file, a `sed` of one or a query that repeats it.
 
 Prefer a regulator's record, a permit, an operator's own page or a dated
 report that names the thing over a search result or a news roundup, and

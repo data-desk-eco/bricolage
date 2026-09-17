@@ -140,7 +140,9 @@ static const char sql_schema[] =
     " create unique index if not exists bric_claim on bric_log (job, key, attempt, kind)"
     " where kind in ('open', 'close', 'error');"
     " "
-    " create view if not exists bric_receipt as select seq, text from bric_log where text is not null;"
+    " create view if not exists bric_receipt as select seq, text,"
+    " iif(text glob 'http*://*', substr(text, 1, instr(text || char(10), char(10)) - 1), null) as url"
+    " from bric_log where text is not null;"
     " "
     " create virtual table if not exists bric_page using fts5 (text, content = 'bric_receipt', content_rowid = 'seq');"
     " "
@@ -202,7 +204,7 @@ static const char sql_sh_tool[] =
     " || ' (`select rowid, snippet(bric_page, 0, '''', '''', '' ... '', 48) from bric_page where bric_page match ''x''`); its rowid is a seq you may cite as if you had read the page.'"
     " || ' bric_log holds the full text of any receipt (`select text from bric_log where seq = N`). a receipt over 20000 characters is cut; page it from bric_log or narrow the script''s output. '"
     " || 'your key is the first user message, verbatim. your answer is a row in ' || ?1 || ' with that key: insert it with `db` against the ddl in the system prompt. a constraint or trigger failure is your receipt, so correct and retry. '"
-    " || 'a column naming a source takes the seq of the receipt whose own text contains your quote (a bric_page rowid is such a seq; web_search results have none). '"
+    " || 'a column naming a source takes the seq of the receipt whose own text contains your quote (a bric_page rowid is such a seq; web_search results have none). `page URL` prints the url first, and bric_receipt (seq, text, url) names the page a receipt is, so cite the receipt of the page itself, not of a file or a query that repeats it. '"
     " || 'the first turn that ends with a row for your key closes the attempt, so a many-row answer is one insert statement in one turn: check each quote against bric_page first',"
     " 'input_schema', json_object('type', 'object', 'properties', json_object('command', json_object('type', 'string')), 'required', json_array('command')))";
 
