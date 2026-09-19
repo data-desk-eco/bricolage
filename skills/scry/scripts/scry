@@ -1,4 +1,0 @@
-#!/bin/sh
-# scry "select ..." — one read-only sql statement against scry.io's public corpora, csv with a header row; the argument or stdin
-curl -sS -m 120 https://api.scry.io/v1/scry/query -H "Authorization: Bearer $SCRY_API_KEY" -H 'Content-Type: text/plain' --data-binary "${1:-@-}" |
-  jq -r 'if .error then "error: " + .error.message else (.columns | map(.name)), .rows[] | @csv end, (select(.deadline_partial or .truncated) | "partial: narrow the where or the limit")'
