@@ -108,6 +108,17 @@ static void squeeze_fn(sqlite3_context *ctx, int argc, sqlite3_value **argv)
     sqlite3_result_text(ctx, s, -1, sqlite3_free);
 }
 
+static void cites(sqlite3_context *ctx, int argc, sqlite3_value **argv)
+{
+    (void)argc;
+    sqlite3_stmt *s;
+    if (sqlite3_prepare_v2(sqlite3_context_db_handle(ctx), sql_cites, -1, &s, NULL)) return sqlite3_result_error(ctx, "cites: no bric_page", -1);
+    sqlite3_bind_value(s, 1, argv[1]);
+    sqlite3_bind_value(s, 2, argv[0]);
+    sqlite3_result_int(ctx, sqlite3_step(s) == SQLITE_ROW);
+    sqlite3_finalize(s);
+}
+
 typedef struct { char *out; size_t n; } Buf;
 
 static size_t on_body(char *p, size_t size, size_t n, void *arg)
@@ -154,7 +165,7 @@ static char *infer(const char *body, char **err)
 
 typedef struct {
     const char *target, *brief, *key, *shell;
-    char *attempt, *usage, *row, *tools, *dir, **envp;
+    char *first, *attempt, *usage, *row, *tools, *dir, **envp;
     int turn, turns, done;
 } Attempt;
 
@@ -162,10 +173,11 @@ static char *logrow(Attempt *a, const char *kind, const char *tool, const char *
 {
     char turn[16];
     snprintf(turn, sizeof turn, "%d", a->turn);
-    char *seq = q(NULL, sql_log, a->brief, a->key, a->attempt, turn, kind, tool, detail, text, a->usage);
+    int rc;
+    char *seq = q(&rc, sql_log, a->target, a->key, a->attempt, turn, kind, tool, detail, text, a->usage);
     sqlite3_free(a->usage);
     a->usage = NULL;
-    a->done |= strcmp(kind, "call") && strcmp(kind, "receipt") && strcmp(kind, "reply");
+    a->done |= rc == SQLITE_BUSY || (strcmp(kind, "call") && strcmp(kind, "receipt") && strcmp(kind, "reply"));
     return seq;
 }
 
@@ -226,8 +238,10 @@ static void serve(int c)
         char *h = strstr(req.out, "Content-Length:");
         if (h) len = atol(h + 15);
     }
-    int rc = body ? sqlite3_exec(L, body + 4, csv, &res, &err) : SQLITE_ERROR;
-    char *head = sqlite3_mprintf("HTTP/1.0 %d OK\r\nContent-Type: text/csv\r\n\r\n%s%s", rc ? 500 : 200, err ? "error: " : "", err ? err : "");
+    int rc = body ? sqlite3_exec(L, body + 4, csv, &res, &err) : SQLITE_ERROR, open = !sqlite3_get_autocommit(L);
+    if (open) sqlite3_exec(L, "rollback", NULL, NULL, NULL);
+    char *head = sqlite3_mprintf("HTTP/1.0 %d OK\r\nContent-Type: text/csv\r\n\r\n%s%s%s", rc || open ? 500 : 200, err || open ? "error: " : "",
+                                 err ? err : open ? "transaction left open" : "", open ? "; the transaction is rolled back" : "");
     for (const char *p = head, *e = p + strlen(p); p < e && (n = write(c, p, e - p)) > 0; p += n);
     for (const char *p = res.out, *e = p + res.n; p < e && (n = write(c, p, e - p)) > 0; p += n);
     sqlite3_free(head);
@@ -415,7 +429,7 @@ static void turn(Attempt *a, const char *system, char **messages)
     char *stop = q(NULL, sql_field, reply, "$", "stop_reason");
     int paused = !n && stop && !strcmp(stop, "pause_turn");
     sqlite3_free(stop);
-    if (!settled(a) && !n && !paused) {
+    if (!n && !paused && !settled(a)) {
         char *text = q(NULL, sql_no_call, reply);
         sqlite3_free(logrow(a, "error", NULL, text, NULL));
         sqlite3_free(text);
@@ -563,9 +577,14 @@ static char *attempt(const char *target, const char *brief, const char *key, con
     if (!ddl) return NULL;
     a.row = q(NULL, sql_row, a.target);
     tools(&a);
-    q(NULL, sql_dead, a.brief, a.key);
-    a.attempt = q(NULL, sql_attempt, a.brief, a.key);
-    char *closed = q(NULL, sql_closed, a.brief, a.key);
+    q(NULL, sql_dead, a.target, a.key);
+    a.attempt = q(NULL, sql_attempt, a.target, a.key);
+    char *closed = q(NULL, a.row, a.key), *source = q(NULL, sql_source, a.target);
+    char *row = source ? q(NULL, sql_row, source) : NULL, *given = row ? q(NULL, row, a.key) : NULL;
+    a.first = q(NULL, sql_first, a.key, given);
+    sqlite3_free(source);
+    sqlite3_free(row);
+    sqlite3_free(given);
     a.dir = sqlite3_mprintf("%s/bric.XXXXXX", env("TMPDIR", "/tmp"));
     if (!mkdtemp(a.dir)) {
         char *err = sqlite3_mprintf("%s: %s", a.dir, strerror(errno));
@@ -580,40 +599,31 @@ static char *attempt(const char *target, const char *brief, const char *key, con
     char *index = skills(a.dir ? a.dir : "");
     char *system = sqlite3_mprintf("%s\n\n%s%s", a.brief, ddl, index);
     sqlite3_free(index);
-    int rc = 1, taken = 0;
+    int rc = 1;
     char self[16];
     snprintf(self, sizeof self, "%d", getpid());
-    while (a.dir && !closed && !taken) {
-        char *live = q(NULL, sql_live);
-        int full = atoi(live ? live : "0") >= atoi(env("BRIC_WORKERS", "4"));
-        sqlite3_free(live);
-        if (!full) {
-            q(NULL, "begin immediate");
-            q(NULL, sql_open, a.brief, a.key, a.attempt, system, env("BRIC_WORKERS", "4"), self, a.tools, a.shell, env("BRIC_MODEL", ""), env("BRIC_PARAMS", "{}"));
-            char *opened = q(NULL, "select changes()");
-            q(NULL, "commit");
-            rc = !atoi(opened);
-            sqlite3_free(opened);
-            if (!rc) break;
-        }
-        char *t = q(NULL, sql_opened, a.brief, a.key, a.attempt);
-        taken = t != NULL;
-        sqlite3_free(t);
-        if (!taken) sleep(1);
+    if (a.dir && !closed) {
+        q(NULL, "begin immediate");
+        q(NULL, sql_open, a.target, a.key, a.attempt, system, env("BRIC_WORKERS", "4"), self, a.tools, a.shell, env("BRIC_MODEL", ""), env("BRIC_PARAMS", "{}"), a.first);
+        char *opened = q(NULL, "select changes()");
+        q(NULL, "commit");
+        rc = !atoi(opened ? opened : "0");
+        sqlite3_free(opened);
     }
     if (!rc) rc = a.done || settled(&a);
     if (!rc) {
-        char *quoted = q(NULL, sql_quote, a.key);
+        char *quoted = q(NULL, sql_quote, a.first);
         char *messages = q(NULL, sql_message, "[]", "user", quoted);
         sqlite3_free(quoted);
         a.turns = atoi(env("BRIC_TURNS", "40"));
         for (a.turn = 1; a.turn <= a.turns && !a.done; a.turn++) turn(&a, system, &messages);
-        if (!a.done) sqlite3_free(logrow(&a, "error", NULL, "turn cap", NULL));
+        if (!a.done && !settled(&a)) sqlite3_free(logrow(&a, "error", NULL, "turn cap", NULL));
         sqlite3_free(messages);
     }
     sqlite3_free(system);
-    char *kind = a.done ? q(NULL, sql_kind, a.brief, a.key, a.attempt) : closed ? sqlite3_mprintf("close") : NULL;
+    char *kind = a.done ? q(NULL, sql_kind, a.target, a.key, a.attempt) : closed ? sqlite3_mprintf("close") : NULL;
     sqlite3_free(closed);
+    sqlite3_free(a.first);
     sqlite3_free(a.attempt);
     sqlite3_free(a.row);
     sqlite3_free(a.tools);
@@ -648,27 +658,29 @@ static void run(sqlite3_context *ctx, int argc, sqlite3_value **argv)
     dispatch();
 }
 
-static void spawn(sqlite3_stmt *job, const char *where)
+static void spawn(sqlite3_stmt *job, const char *key)
 {
     while (waitpid(-1, NULL, WNOHANG) > 0);
     Dl_info self;
     dladdr((void *)spawn, &self);
-    const char *col[7];
-    for (int i = 0; i < 7; i++) col[i] = (const char *)sqlite3_column_text(job, i);
+    const char *col[7] = { 0 };
+    for (int i = 0; job && i < 7; i++) col[i] = (const char *)sqlite3_column_text(job, i);
     char *load = sqlite3_mprintf(".load %s", self.dli_fname);
-    char *sql = sqlite3_mprintf("pragma busy_timeout = 999999999; begin immediate; commit; select run(%Q, %Q, key, %Q) from \"%w\" where %s", col[1], col[2], col[3], col[0], where);
+    char *wait = sqlite3_mprintf("pragma busy_timeout = %d; begin immediate; commit", 1000 * atoi(env("BRIC_TIMEOUT", "120")));
+    char *sql = job ? sqlite3_mprintf("select run(%Q, %Q, key, %Q) from \"%w\" where \"key\" = %Q", col[1], col[2], col[3], col[0], key) : NULL;
     if (!fork()) {
         setsid();
-        setenv("BRIC_WORKER", "1", 1);
+        if (job) setenv("BRIC_WORKER", "1", 1);
         if (col[4]) setenv("BRIC_MODEL", col[4], 1);
         if (col[5]) setenv("BRIC_PARAMS", col[5], 1);
         if (col[6]) setenv("BRIC_SKILLS", col[6], 1);
         int null = open("/dev/null", O_RDWR);
         for (int fd = 0; fd < 3; fd++) dup2(null, fd);
-        execlp(env("BRIC_SQLITE", "sqlite3"), "sqlite3", file, "-cmd", load, sql, (char *)NULL);
+        execlp(env("BRIC_SQLITE", "sqlite3"), "sqlite3", file, "-cmd", wait, "-cmd", load, sql ? sql : "select 1", (char *)NULL);
         _exit(1);
     }
     sqlite3_free(load);
+    sqlite3_free(wait);
     sqlite3_free(sql);
 }
 
@@ -681,13 +693,9 @@ static void dispatch(void)
     sqlite3_stmt *j, *k;
     if (free <= 0 || sqlite3_prepare_v2(L, sql_jobs, -1, &j, NULL)) return;
     while (free > 0 && sqlite3_step(j) == SQLITE_ROW) {
-        char *sql = sqlite3_mprintf(sql_pending, sqlite3_column_text(j, 2), sqlite3_column_text(j, 0), atoi(env("BRIC_ATTEMPTS", "3")), free);
+        char *sql = sqlite3_mprintf(sql_pending, sqlite3_column_text(j, 1), sqlite3_column_text(j, 0), sqlite3_column_text(j, 1), atoi(env("BRIC_ATTEMPTS", "3")), free);
         if (!sqlite3_prepare_v2(L, sql, -1, &k, NULL)) {
-            for (; free > 0 && sqlite3_step(k) == SQLITE_ROW; free--) {
-                char *where = sqlite3_mprintf("\"key\" = %Q", sqlite3_column_text(k, 0));
-                spawn(j, where);
-                sqlite3_free(where);
-            }
+            for (; free > 0 && sqlite3_step(k) == SQLITE_ROW; free--) spawn(j, (const char *)sqlite3_column_text(k, 0));
             sqlite3_finalize(k);
         }
         sqlite3_free(sql);
@@ -695,19 +703,31 @@ static void dispatch(void)
     sqlite3_finalize(j);
 }
 
+static int inserted[2];
+
 static void hook(void *arg, int op, const char *dbname, const char *table, sqlite3_int64 rowid)
 {
-    (void)arg, (void)dbname;
-    if (op != SQLITE_INSERT) return;
+    (void)dbname, (void)rowid;
+    int *seen = arg;
+    if (op != SQLITE_INSERT || *seen) return;
     sqlite3_stmt *s;
     if (sqlite3_prepare_v2(L, sql_job, -1, &s, NULL)) return;
     sqlite3_bind_text(s, 1, table, -1, SQLITE_STATIC);
-    if (sqlite3_step(s) == SQLITE_ROW) {
-        char *where = sqlite3_mprintf("rowid = %lld", rowid);
-        spawn(s, where);
-        sqlite3_free(where);
-    }
+    *seen = sqlite3_step(s) == SQLITE_ROW;
     sqlite3_finalize(s);
+}
+
+static int committed(void *arg)
+{
+    int *seen = arg;
+    if (*seen) spawn(NULL, NULL);
+    *seen = 0;
+    return 0;
+}
+
+static void rolled_back(void *arg)
+{
+    *(int *)arg = 0;
 }
 
 int sqlite3_bric_init(sqlite3 *db, char **err, const sqlite3_api_routines *api)
@@ -719,15 +739,21 @@ int sqlite3_bric_init(sqlite3 *db, char **err, const sqlite3_api_routines *api)
     file = file && *file ? sqlite3_mprintf("%s", file) : NULL;
     L = db;
     if (file && sqlite3_open(file, &L) == SQLITE_OK) {
-        sqlite3_busy_timeout(L, 999999999);
-        sqlite3_exec(L, "pragma journal_mode = wal", NULL, NULL, NULL);
+        sqlite3_busy_timeout(L, 1000 * atoi(env("BRIC_TIMEOUT", "120")));
+        sqlite3_exec(L, "pragma journal_mode = wal; pragma synchronous = normal", NULL, NULL, NULL);
         schema();
-        sqlite3_update_hook(db, hook, NULL);
-        sqlite3_update_hook(L, hook, NULL);
+        sqlite3 *c[] = { db, L };
+        for (int i = 0; i < 2; i++) {
+            sqlite3_update_hook(c[i], hook, &inserted[i]);
+            sqlite3_commit_hook(c[i], committed, &inserted[i]);
+            sqlite3_rollback_hook(c[i], rolled_back, &inserted[i]);
+        }
     }
     sqlite3_create_function(L, "alive", 1, SQLITE_UTF8, NULL, alive, NULL, NULL);
     sqlite3_create_function(L, "squeeze", 1, SQLITE_UTF8 | SQLITE_DETERMINISTIC, NULL, squeeze_fn, NULL, NULL);
     sqlite3_create_function(db, "squeeze", 1, SQLITE_UTF8 | SQLITE_DETERMINISTIC, NULL, squeeze_fn, NULL, NULL);
+    sqlite3_create_function(L, "cites", 2, SQLITE_UTF8 | SQLITE_INNOCUOUS, NULL, cites, NULL, NULL);
+    sqlite3_create_function(db, "cites", 2, SQLITE_UTF8 | SQLITE_INNOCUOUS, NULL, cites, NULL, NULL);
     sqlite3_create_function(db, "run", 3, SQLITE_UTF8 | SQLITE_DIRECTONLY, NULL, run, NULL, NULL);
     sqlite3_create_function(db, "run", 4, SQLITE_UTF8 | SQLITE_DIRECTONLY, NULL, run, NULL, NULL);
     if (!getenv("BRIC_WORKER")) dispatch();

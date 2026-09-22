@@ -4,11 +4,14 @@ static const char sql_attempt[] =
 static const char sql_calls[] =
     "select json_group_array(json(value)) from json_each(?1, '$.content') where value ->> 'type' = 'tool_use'";
 
-static const char sql_closed[] =
-    "select 1 from bric_log where job = ?1 and key = ?2 and kind = 'close'";
+static const char sql_cites[] =
+    "select 1 from bric_page('\"' || replace(?1, '\"', '\"\"') || '\"') where rowid = ?2";
 
 static const char sql_count[] =
     "select count(*) from json_each(?1)";
+
+static const char sql_source[] =
+    "select source from bric_job where target = ?1";
 
 static const char sql_ddl[] =
     "select sql from sqlite_schema where name = ?1 and type = 'table'";
@@ -20,6 +23,9 @@ static const char sql_dead[] =
     " where job = ?1 and key = ?2 and attempt is not null"
     " group by attempt"
     " having sum(kind in ('close', 'error')) = 0 and not alive(max(iif(kind = 'open', detail ->> 'pid', null)))";
+
+static const char sql_first[] =
+    "select iif((select count(*) from json_each(?2, '$[0]')) > 1, ?2 ->> '$[0]', ?1)";
 
 static const char sql_field[] =
     "select ?1 -> ?2 ->> ?3";
@@ -38,7 +44,7 @@ static const char sql_kind[] =
 
 #define SQL_LIVE \
     "select count(*) from (" \
-    " select 1 from bric_log where attempt is not null group by job, key, attempt" \
+    " select 1 from bric_log where kind in ('open', 'close', 'error') group by job, key, attempt" \
     " having sum(kind in ('close', 'error')) = 0 and alive(max(iif(kind = 'open', detail ->> 'pid', null))))"
 
 static const char sql_live[] = SQL_LIVE;
@@ -57,24 +63,23 @@ static const char sql_no_call[] =
 
 static const char sql_nudge[] =
     "select json_insert(?1, '$[#]', json_object('type', 'text', 'text',"
-    " ?2 || ' turns left. insert your row into ' || ?3 || ' now, at whatever confidence the evidence supports'))";
+    " ?2 || ' turns left. insert your rows into ' || ?3 || ' now, at whatever confidence the evidence supports, and end your turn'))";
 
 static const char sql_open[] =
     "insert or ignore into bric_log (job, key, attempt, turn, kind, detail)"
-    " select ?1, ?2, ?3, 0, 'open', json_object('system', ?4, 'pid', ?6, 'tools', json(?7), 'shell', ?8, 'model', ?9, 'params', json(?10))"
+    " select ?1, ?2, ?3, 0, 'open', json_object('system', ?4, 'message', ?11, 'pid', ?6, 'tools', json(?7), 'shell', ?8, 'model', ?9, 'params', json(?10))"
     " where cast(?5 as integer) > (" SQL_LIVE ")";
-
-static const char sql_opened[] =
-    "select 1 from bric_log where job = ?1 and key = ?2 and attempt = ?3 and kind = 'open'";
 
 static const char sql_pending[] =
     "with a as ("
-    " select key, sum(kind = 'close') as closed, sum(kind = 'error') as errs,"
+    " select key, max(seq) as seq, sum(kind = 'close') as closed, sum(kind = 'error') as errs,"
     " alive(max(iif(kind = 'open', detail ->> 'pid', null))) as up"
-    " from bric_log where job = %Q and attempt is not null group by key, attempt)"
-    " select s.\"key\" from \"%w\" as s left join a on a.key = s.\"key\""
-    " group by s.\"key\""
-    " having max(coalesce(closed, 0)) = 0 and max(coalesce(closed = 0 and errs = 0 and up, 0)) = 0 and coalesce(sum(errs), 0) < %d"
+    " from bric_log where job = %Q and kind in ('open', 'close', 'error') group by key, attempt)"
+    " select s.\"key\" from \"%w\" as s"
+    " where not exists (select 1 from \"%w\" as t where t.\"key\" = s.\"key\")"
+    " and not exists (select 1 from a where a.key = s.\"key\" and not closed and not errs and up)"
+    " and (select count(*) from a where a.key = s.\"key\" and errs"
+    " and seq > (select coalesce(max(seq), 0) from a as c where c.key = s.\"key\" and closed)) < %d"
     " limit %d";
 
 static const char sql_push[] =
@@ -106,7 +111,7 @@ static const char sql_result[] =
     "select json_object('type', 'tool_result', 'tool_use_id', ?1, 'content', iif(json_valid(?2), json(?2), ?2))";
 
 static const char sql_row[] =
-    "select printf('select json_object(%s) from \"%w\" where \"key\" = ?1',"
+    "select printf('select nullif(json_group_array(json_object(%s)), ''[]'') from \"%w\" where \"key\" = ?1',"
     " group_concat(printf('%Q, iif(typeof(\"%w\") = ''blob'', cast(\"%w\" as text), \"%w\")', name, name, name, name)), ?1)"
     " from pragma_table_info(?1)";
 
@@ -140,6 +145,9 @@ static const char sql_schema[] =
     " create unique index if not exists bric_claim on bric_log (job, key, attempt, kind)"
     " where kind in ('open', 'close', 'error');"
     " "
+    " create index if not exists bric_live on bric_log (job, key, attempt, kind, iif(kind = 'open', detail ->> 'pid', null))"
+    " where kind in ('open', 'close', 'error');"
+    " "
     " create view if not exists bric_receipt as select seq, text,"
     " iif(text glob 'http*://*', substr(text, 1, instr(text || char(10), char(10)) - 1), null) as url"
     " from bric_log where text is not null;"
@@ -171,10 +179,11 @@ static const char sql_schema[] =
     " group by job, key"
     " ) as u using (seq);"
     " "
-    " create view if not exists bric_transcript as"
+    " drop view if exists bric_transcript;"
+    " create view bric_transcript as"
     " select job, key, attempt, json_group_array(json(message)) as messages"
     " from ("
-    " select job, key, attempt, seq, json_object('role', 'user', 'content', key) as message"
+    " select job, key, attempt, seq, json_object('role', 'user', 'content', coalesce(detail ->> 'message', key)) as message"
     " from bric_log where kind = 'open'"
     " union all"
     " select job, key, attempt, seq, json_object('role', 'assistant', 'content', json(detail))"
@@ -203,9 +212,9 @@ static const char sql_sh_tool[] =
     " || '`db \"sql\"` runs sql against the research database and prints csv with a header row; a statement''s error is the receipt. bric_page is fts5 over every page any attempt here has read'"
     " || ' (`select rowid, snippet(bric_page, 0, '''', '''', '' ... '', 48) from bric_page where bric_page match ''x''`); its rowid is a seq you may cite as if you had read the page.'"
     " || ' bric_log holds the full text of any receipt (`select text from bric_log where seq = N`). a receipt over 20000 characters is cut; page it from bric_log or narrow the script''s output. '"
-    " || 'your key is the first user message, verbatim. your answer is a row in ' || ?1 || ' with that key: insert it with `db` against the ddl in the system prompt. a constraint or trigger failure is your receipt, so correct and retry. '"
+    " || 'your key is the first user message, verbatim, or its key when that message is a json object, the row you were given. your answer is the rows in ' || ?1 || ' with that key: insert them with `db` against the ddl in the system prompt. a constraint or trigger failure is your receipt, so correct and retry. '"
     " || 'a column naming a source takes the seq of the receipt whose own text contains your quote (a bric_page rowid is such a seq; web_search results have none). `page URL` prints the url first, and bric_receipt (seq, text, url) names the page a receipt is, so cite the receipt of the page itself, not of a file or a query that repeats it. '"
-    " || 'the first turn that ends with a row for your key closes the attempt, so a many-row answer is one insert statement in one turn: check each quote against bric_page first',"
+    " || 'a `db` call that leaves a transaction open, as one that fails between begin and commit does, is rolled back. the attempt closes when you end a turn without a tool call, so insert every row first',"
     " 'input_schema', json_object('type', 'object', 'properties', json_object('command', json_object('type', 'string')), 'required', json_array('command')))";
 
 static const char sql_usage[] =

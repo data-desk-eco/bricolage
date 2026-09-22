@@ -8,6 +8,10 @@ PNG64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP4z8DwHwAFAAI
 SQLITE = os.environ.get('SQLITE', 'sqlite3')
 
 
+def keyof(message):
+    return json.loads(message)['key'] if message.startswith('{') else message
+
+
 def sh(id, script):
     return {'type': 'tool_use', 'id': id, 'name': 'sh', 'input': {'command': script}}
 
@@ -26,7 +30,7 @@ class H(BaseHTTPRequestHandler):
     def do_POST(self):
         req = json.loads(self.rfile.read(int(self.headers['content-length'])))
         H.calls.append(req)
-        key = req['messages'][0]['content']
+        key = keyof(req['messages'][0]['content'])
         paused = key == 'bolt' and req['messages'][-1]['role'] == 'assistant'
         turn = sum(m['role'] == 'assistant' for m in req['messages'])
         turn -= key == 'bolt' and turn > 0
@@ -40,9 +44,14 @@ class H(BaseHTTPRequestHandler):
         if req['system'].startswith('bare shell'):
             if turn == 0:
                 content = [sh('b1', 'echo "X=$X"')]
-            else:
+            elif turn == 1:
                 assert last.endswith('] X=1'), last
                 content = [sh('b2', 'db "insert into bare values (\'%s\', cast(\'Globex\' as blob))"' % key)]
+            elif turn == 2:
+                content = [sh('b3', 'db "begin; insert into bare values (\'x\', \'y\'); insert into bare values (\'x\', \'z\'); commit;"')]
+            else:
+                assert 'UNIQUE' in last and 'rolled back' in last, last
+                content = [{'type': 'text', 'text': 'done'}]
         elif key == 'plain':
             content = [{'type': 'text', 'text': 'no idea'}]
         elif key == 'bolt' and turn == 0 and not paused:
@@ -89,8 +98,7 @@ create table if not exists results (
 );
 create trigger if not exists results_cite before insert on results
 begin
-  select raise(abort, 'quote not found in source ' || new.source)
-   where not exists (select 1 from bric_page('"' || replace(new.quote, '"', '""') || '"') where rowid = new.source);
+  select raise(abort, 'quote not found in source') where not cites(new.source, new.quote);
 end;
 select run('results', 'Resolve each operator to its parent.', key) from company where key not in (select key from results);
 '''
@@ -127,7 +135,7 @@ def main():
     r = sqlite("select count(*) from bric_page where bric_page match 'globex' and rowid in (select seq from bric_log where key = 'acme' and tool = 'sh');")
     assert r.stdout == '1\n', r.stdout
     r = sqlite("select kind, input, output, calls, images, age < 60 from bric_attempt where key = 'acme';")
-    assert r.stdout == 'close|40|20|7|1|1\n', r.stdout
+    assert r.stdout == 'close|50|25|7|1|1\n', r.stdout
     r = sqlite("select json_array_length(detail -> 'tools'), detail ->> 'shell', detail -> 'tools' ->> '$[1].name' from bric_log where key = 'acme' and kind = 'open';")
     assert r.stdout == '2|sh|sh\n', r.stdout
     r = sqlite("select instr(text, '  '), detail like '%chars: https://example.org/acme' from bric_log where key = 'acme' and kind = 'receipt' and tool = 'sh' order by seq limit 1;")
@@ -138,29 +146,28 @@ def main():
     assert r.stdout == '1|[image/png, %d bytes]\n' % len(PNG), r.stdout
     r = sqlite("select detail ->> 'command' from bric_log where key = 'acme' and kind = 'call' and tool = 'sh' order by seq limit 1 offset 3;")
     assert r.stdout == 'cat f; sleep 5\n', r.stdout
-    r = sqlite("select detail ->> 'parent', detail ->> 'key' from bric_log where key = 'acme' and kind = 'close';")
+    r = sqlite("select detail ->> '$[0].parent', detail ->> '$[0].key' from bric_log where key = 'acme' and kind = 'close';")
     assert r.stdout == 'Globex|acme\n', r.stdout
     r = sqlite("update bric_log set text = 'forged' where key = 'acme' and kind = 'receipt';")
     assert 'append-only' in r.stderr, r.stderr
     r = sqlite("drop trigger bric_log_update; drop trigger bric_log_delete;",
                "delete from bric_log where key = 'plain';",
-               "insert into bric_log (ts, job, key, attempt, turn, kind) values (datetime('now', '-1 hour'), 'Resolve each operator to its parent.', 'plain', 1, 3, 'call');",
-               "delete from results where key = 'acme';",
-               "delete from bric_log where key = 'acme' and kind = 'close';")
+               "insert into bric_log (ts, job, key, attempt, turn, kind) values (datetime('now', '-1 hour'), 'results', 'plain', 1, 3, 'call');",
+               "delete from results where key = 'acme';")
     r = sqlite(SQL)
     assert not r.returncode, r.stderr
     r = sqlite("select key, attempt, kind from bric_log where kind in ('open', 'close', 'error') and key in ('plain', 'acme') order by seq;")
-    assert r.stdout == 'acme|1|open\nacme|1|error\nacme|2|open\nacme|2|close\nplain|1|error\nplain|2|open\nplain|2|error\n', r.stdout
+    assert r.stdout == 'acme|1|open\nacme|1|close\nacme|2|open\nacme|2|close\nplain|1|error\nplain|2|open\nplain|2|error\n', r.stdout
     r = sqlite("delete from company where key = 'plain';")
     calls = len(H.calls)
-    r = sqlite(SQL)
+    r = sqlite(SQL, SQL.replace('Resolve each', 'Resolve every'))
     assert not r.returncode and len(H.calls) == calls, r.stderr
     r = sqlite(".load ./ext/bric", "create table bare (key text primary key, parent text);", "select run('bare', 'bare shell', 'acme', 'env X=1 sh');")
     assert r.stdout == 'close\n', (r.stdout, r.stderr)
-    r = sqlite("select detail ->> 'shell', (select parent from bare) from bric_log where job = 'bare shell' and kind = 'open';")
-    assert r.stdout == 'env X=1 sh|Globex\n', r.stdout
+    r = sqlite("select detail ->> 'shell', (select group_concat(parent) from bare), detail ->> '$[0].key' from bric_log where job = 'bare' and kind in ('open', 'close') order by seq;")
+    assert r.stdout == 'env X=1 sh|Globex|\n|Globex|acme\n', r.stdout
     r = sqlite("select json_array_length(messages), messages ->> '$[1].content[0].type', messages ->> '$[2].content[0].type', messages ->> '$[3].content[0].tool_use_id' from bric_transcript where key = 'bolt';")
-    assert r.stdout == '10|server_tool_use|tool_use|c1\n', r.stdout
+    assert r.stdout == '11|server_tool_use|tool_use|c1\n', r.stdout
     assert not [d for d in os.listdir(os.environ.get('TMPDIR', '/tmp')) if d.startswith('bric.')]
 
     os.environ['BRIC_WORKERS'] = '1'
@@ -172,15 +179,21 @@ def main():
     assert r.stdout == '0\n', (r.returncode, r.stdout, r.stderr)
     for _ in range(100):
         time.sleep(0.2)
-        r = sqlite("select key, parent from results where key like 'dyn%' order by key;")
+        r = sqlite("select key, parent from results join bric_log using (key) where key like 'dyn%' and kind = 'close' order by key;")
         if r.stdout == 'dyn|Globex\ndyn2|Globex\n':
             break
     assert r.stdout == 'dyn|Globex\ndyn2|Globex\n', r.stdout
+    time.sleep(1)
     r = sqlite("select count(distinct attempt) from bric_log where key like 'dyn%';")
     assert r.stdout == '1\n', r.stdout
-    assert {(c['model'], c.get('thinking', {}).get('type')) for c in H.calls if c['messages'][0]['content'].startswith('dyn')} == {('cheap', 'disabled')}, H.calls[-1]
+    # one slot: the second key is spawned by the first's exit, not left waiting for it
+    r = sqlite("select group_concat(kind) from (select kind from bric_log where key like 'dyn%' and kind in ('open', 'close') order by seq);")
+    assert r.stdout == 'open,close,open,close\n', r.stdout
+    assert {(c['model'], c.get('thinking', {}).get('type')) for c in H.calls if keyof(c['messages'][0]['content']).startswith('dyn')} == {('cheap', 'disabled')}, H.calls[-1]
     r = sqlite("select detail ->> 'model', detail -> 'params' from bric_log where key = 'dyn' and kind = 'open';")
     assert r.stdout == 'cheap|{"thinking":{"type":"disabled"}}\n', r.stdout
+    r = sqlite("select messages ->> '$[0].content' from bric_transcript where key = 'dyn';")
+    assert r.stdout == '{"key":"dyn","parent":null,"source":null}\n', r.stdout
     r = sqlite("select detail ->> 'system' like '%skills are what has already been worked out%- echo: says hello (%/echo/SKILL.md)' from bric_log where key = 'dyn' and kind = 'open';")
     assert r.stdout == '1\n', r.stdout
 

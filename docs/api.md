@@ -1,6 +1,6 @@
 # API
 
-Loading the extension adds three functions, three tables and two views.
+Loading the extension adds four functions, three tables and three views.
 The tables are created on `.load`, so a script can insert into `bric_job`
 straight after loading.
 
@@ -11,60 +11,76 @@ Runs one research attempt for `key` and inserts the answer into `target`.
 constraints and triggers, is the contract the model writes against and the
 one SQLite enforces. `brief` is the task in prose, shared by every key in
 the job. `shell` is the executor, default `BRIC_SHELL`. The model
-has `web_search` and `sh`, and answers by inserting its row with `sqlite3`;
-after every turn the worker checks `target` for a row with this `key`, and
-the first one it finds closes the attempt. See [Shell](#shell) for what
-`sh` is given.
+has `web_search` and `sh`, and answers by inserting its rows with `db`. The
+first user message is `key`, or, when a job in `bric_job` names `target` and
+its source has columns beside `key`, that source row as JSON. A turn that
+ends without a tool call ends the attempt: it closes if `target` has a row
+with this `key`, and is an error if not. See [Shell](#shell) for what `sh`
+is given.
 
-Returns `'close'` when the row was inserted, `'error'` when the attempt
+Returns `'close'` when the rows were inserted, `'error'` when the attempt
 failed, with the `error` row saying why (the model stopped without a row,
 the API refused a request, the scratch directory could not be made, or the
-turn cap was hit), and `NULL` when another worker claimed the attempt. A key that already has a close row returns `'close'` without a model
-call, and an attempt whose worker process is gone (`kill -0` on the pid in
-its `open` row) is treated as dead and retried, so a `SELECT run(...)` over
-the whole to-do list is safe to rerun.
-It waits for one of `BRIC_WORKERS` slots before starting. Only
-callable at the top level of a statement, not from views or triggers.
+turn cap was hit), and `NULL` when another worker claimed the attempt or
+all `BRIC_WORKERS` slots were taken. A key that already has a row in
+`target` returns `'close'` without a model call, and an attempt whose worker
+process is gone (`kill -0` on the pid in its `open` row) is treated as dead
+and retried, so a `SELECT run(...)` over the whole to-do list is safe to
+rerun. Only callable at the top level of a statement, not from views or
+triggers.
 
 ## `alive(pid)`
 
 True when a process with that pid exists. The liveness test behind the
 dead-attempt check and the worker slots.
 
+## `cites(source, quote)`
+
+True when `quote` is a phrase on the receipt numbered `source`: the cite
+check, a phrase query against `bric_page`, which ignores whitespace, case
+and punctuation. It is safe in a trigger, so a result table's receipt is one
+line, as in `company.sql`:
+
+    select raise(abort, 'quote not found in source') where not cites(new.source, new.quote);
+
+A connection must have the extension loaded to insert into a table whose
+trigger calls it; the model's `db` always does.
+
 ## `squeeze(text)`
 
 Collapses runs of whitespace to one space and strips base64 data URLs and
 bytes that are not UTF-8, which an API would refuse. Every receipt is stored
-squeezed. A cite trigger should not need it: a phrase
-query against `bric_page`, as in `company.sql`, ignores whitespace, case
-and punctuation and works from any `sqlite3`, including the model's.
+squeezed.
 
 ## `bric_job`
 
 One row per job: `source`, the to-do table (any table with a `key` column,
 and the primary key here), `target`, `brief` and optional `shell`, `model`, `params` and `skills`.
+A job is its target: the log knows it by that name, so a brief can be edited
+without rerunning anything, and two jobs should not share a target.
 Insert a row to register a job:
 
     insert or replace into bric_job (source, target, brief)
     values ('company', 'company_parent', 'Resolve each operator ...');
 
-From then on a key in `source` with no answer is pending, and pending
-keys get workers, `sqlite3 db "select run(target, brief, key, shell)"`,
-that outlive whatever started them. Work is found by state, not by event:
-the extension looks for pending keys when it is loaded, when a row is
-inserted into `source` on a connection that has it loaded, and when any
-worker finishes. So a trigger on one job's target that inserts into
+From then on a key in `source` with no row in `target` is pending, and
+pending keys get workers, `sqlite3 db "select run(target, brief, key, shell)"`,
+that outlive whatever started them, one per free slot of `BRIC_WORKERS`;
+nothing waits for a slot. Work is found by state, not by event: the
+extension looks for pending keys when it is loaded, when a transaction that
+inserted into `source` commits on a connection that has it loaded, and when
+any worker finishes. So a trigger on one job's target that inserts into
 another's source chains the two jobs, the model's own inserts included,
 and after a crash or reboot `sqlite3 db ".load bric"` restarts whatever
-was left; nothing needs to run in between. A worker spawned by the hook
-waits for the inserting transaction to commit, and does nothing if it
-rolls back, so a bulk `.import` loses no keys.
+was left; nothing needs to run in between. A transaction that rolls back
+starts nothing, and a bulk `.import` starts one look, not one per row.
 
-A key is pending when it has no `close` row, no live attempt (an `open`
-row whose pid is alive), and fewer than `BRIC_ATTEMPTS` `error` rows; a
-key that has failed that many times stays put, and `select key from
-source except select key from target` lists them. Delete its error rows
-to try again.
+A key is pending when it has no row in `target`, no live attempt (an
+`open` row whose pid is alive), and fewer than `BRIC_ATTEMPTS` `error` rows
+since its last `close`; a key that has failed that many times stays put,
+and `select key from source except select key from target` lists them.
+Delete a key's rows from `target` to research it again, and raise
+`BRIC_ATTEMPTS` to try a failed one again.
 
 `shell` NULL means `BRIC_SHELL`; `model` NULL means `BRIC_MODEL`, so a
 cheap model can run one job and a strong one another against the same
@@ -90,21 +106,22 @@ spawned.
 
 ## `bric_log`
 
-The append-only log, one row per event. `job` is the brief, `key` and
+The append-only log, one row per event. `job` is the target, `key` and
 `attempt` identify the attempt, `turn` counts model calls within it.
 
 | `kind`    | what                                                       |
 |-----------|------------------------------------------------------------|
-| `open`    | attempt claimed; `detail` is the system prompt, the tools as sent, the `shell` and the worker `pid` |
+| `open`    | attempt claimed; `detail` is the system prompt, the first user `message`, the tools as sent, the `shell` and the worker `pid` |
 | `reply`   | a model turn; `detail` is its content verbatim, including any thinking; a `pause_turn` reply (the server paused a long search turn) is resent as is, and only a turn that ends without a call or a row is an error |
 | `call`    | a tool call the model made; `tool` and `detail` (arguments; for `sh`, `{"command": ...}`) |
 | `receipt` | a tool result; `text` is its squeezed content, `seq` is what a result row cites as its source |
-| `close`   | a row for the key exists in the target; `detail` is that row as JSON |
+| `close`   | the model ended a turn with rows for the key in the target; `detail` is those rows as a JSON array |
 | `error`   | the attempt failed; `detail` says why                       |
 
 `usage` holds the token counts per turn as JSON. A partial unique index
 over `(job, key, attempt)` for `open`, `close` and `error` is the claim:
-two workers cannot open the same attempt. Triggers refuse every update and
+two workers cannot open the same attempt, and a second partial index
+covers the live-attempt count, so finding work never reads a receipt. Triggers refuse every update and
 delete, so the log is append-only for the model, which can reach it from
 its shell, and for you; drop `bric_log_update` and `bric_log_delete` to
 prune.
@@ -119,16 +136,8 @@ and `lng.sql` refuses a source whose `url` is null.
 `select rowid, snippet(bric_page, 0, '', '', ' ... ', 48) from bric_page
 where bric_page match 'x'` finds every page any attempt has read, and the
 rowid is a `seq` a result row may cite. The model runs this through
-`db` in its shell; so can you. It is also the cite check: a result
-table's trigger asks whether the quote is a phrase on the cited receipt,
-
-    where not exists (
-      select 1 from bric_page('"' || replace(new.quote, '"', '""') || '"')
-      where rowid = new.source
-    )
-
-using the table-valued form, which the `sqlite3` shell allows inside a
-trigger where the `match` operator is refused as unsafe.
+`db` in its shell; so can you. It is also the cite check behind
+[`cites`](#citessource-quote).
 
 ## `bric_attempt`
 
@@ -150,7 +159,7 @@ To tail the log itself,
 ## `bric_transcript`
 
 One row per `(job, key, attempt)` with `messages`, the conversation as the
-API saw it, rebuilt from the log: the key, each `reply`, and each turn's
+API saw it, rebuilt from the log: the first message, each `reply`, and each turn's
 receipts as `tool_result` blocks. Together with the `open` row's system
 prompt and tools this is the whole request, so any attempt can be replayed
 or resumed. Images are not kept.
@@ -167,7 +176,10 @@ holds `bin/db` and a symlink to every skill script, so `PATH` starts with
 path the system prompt's index gives; `.script`, the current call; and
 `.db`, a unix socket bric listens on for as long as the script runs. `db
 "sql"` (or `db` with the sql on stdin) posts it there with curl and
-prints csv with a header row, or the error and exit 22. The sql runs on
+prints csv with a header row, or the error and exit 22. A call that
+leaves a transaction open, as one that fails between `begin` and `commit`
+does, is rolled back and says so, so no script holds the write lock past
+its own call. The sql runs on
 the worker's own connection, with its busy timeout, so a sandbox needs
 nothing but the scratch directory writable and the system's tools
 readable; the home directory can be denied outright. The environment is the
@@ -196,6 +208,6 @@ Everything is an environment variable, read when `run` is called:
 | `BRIC_SHELL`        | `sh`                                     | the executor each script's path is passed to; `run`'s fourth argument and `bric_job.shell` override it |
 | `BRIC_ATTEMPTS`     | `3`                                      | attempts per key before it stops being pending    |
 | `BRIC_TURNS`        | `40`                                     | turns per attempt; the last three carry a note telling the model to insert now |
-| `BRIC_WORKERS`      | `4`                                      | attempts live at once; `run` waits for a slot     |
+| `BRIC_WORKERS`      | `4`                                      | attempts live at once; a worker with no free slot exits, and the next to finish starts it again |
 | `BRIC_SQLITE`       | `sqlite3`                                | the shell workers run in; must be able to `.load` |
-| `BRIC_TIMEOUT`      | `120`                                    | seconds per HTTP call and per shell call           |
+| `BRIC_TIMEOUT`      | `120`                                    | seconds per HTTP call, per shell call and per wait for the write lock; an attempt that waits longer stops, and is retried as dead |

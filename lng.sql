@@ -23,12 +23,7 @@ drop trigger if exists coast_terminal_cite;
 create trigger coast_terminal_cite
 before insert on coast_terminal
 begin
-  select raise(abort, 'quote not found in source')
-  where not exists (
-    select 1
-    from bric_page('"' || replace(new.quote, '"', '""') || '"')
-    where rowid = new.source
-  );
+  select raise(abort, 'quote not found in source') where not cites(new.source, new.quote);
   select raise(abort, 'source is not a page: cite the receipt `page URL` printed, which starts with its url')
   where (select url from bric_receipt where seq = new.source) is null;
 end;
@@ -67,12 +62,7 @@ drop trigger if exists terminal_party_cite;
 create trigger terminal_party_cite
 before insert on terminal_party
 begin
-  select raise(abort, 'quote not found in source')
-  where not exists (
-    select 1
-    from bric_page('"' || replace(new.quote, '"', '""') || '"')
-    where rowid = new.source
-  );
+  select raise(abort, 'quote not found in source') where not cites(new.source, new.quote);
   select raise(abort, 'source is not a page: cite the receipt `page URL` printed, which starts with its url')
   where (select url from bric_receipt where seq = new.source) is null;
 end;
@@ -92,8 +82,7 @@ LNG` or `Coral South FLNG`, without a tracker''s suffix like `Terminal`; a
 new train or phase of an existing plant is that plant''s row, not its own. Start from a tracker that lists them all (Global
 Energy Monitor''s LNG terminal tracker, GIIGNL''s annual report, the IGU
 world LNG report, a regulator''s project list) and confirm each on its
-own page. A coast with many projects is still one list: insert every row in
-one statement, in one turn, and expect twenty rows for a large exporter.
+own page, and expect twenty rows for a large exporter.
 
 `source` is the receipt of the page you read it on and `quote` is a phrase
 from that page naming the terminal, exactly as printed.',
@@ -117,10 +106,7 @@ the operator''s own page or a regulator''s filing over a news roundup.
 
 `source` is the receipt of the page you read it on and `quote` is a phrase
 from that page naming the company in that role, exactly as printed. A role
-you cannot find is left out; a low-confidence row says why in `scope`.
-The first turn that ends with a row for your key closes the attempt, so
-gather every role first, check each quote against `bric_page`, then insert
-all your rows in one statement.',
+you cannot find is left out; a low-confidence row says why in `scope`.',
   './skills/web',
   '{"max_tokens": 16384}'
 );

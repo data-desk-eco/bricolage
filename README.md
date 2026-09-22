@@ -37,14 +37,14 @@ starts an agent:
     sqlite3 research.db -cmd '.load ./ext/bric' \
       "insert into company values ('Petroleum Development Oman')"
 
-There is no daemon. Each row inserted on a connection with the extension
-loaded gets a worker of its own, which outlives the connection; only
-`BRIC_WORKERS` run at once and the rest wait for a slot. Keys inserted
-without the extension start nothing. To start, or restart, work on every
-key that has no result, insert them again:
-
-    insert or replace into company
-    select * from company where key not in (select key from company_parent)
+There is no daemon and no queue. A key is pending while the result table
+has no row for it, and a commit that inserts keys on a connection with the
+extension loaded starts a worker for each pending key up to `BRIC_WORKERS`;
+each worker outlives the connection, and each that finishes starts the
+next. Keys inserted without the extension start nothing until something
+loads it: `sqlite3 research.db ".load ./ext/bric"` restarts whatever is left.
+Delete a key's rows from the result table to research it again; editing a
+brief reruns nothing.
 
 ## Tools
 
@@ -62,9 +62,11 @@ uses, `./skills/{archive,web}`, and the model gets an index and reads a
 skill, and runs its scripts, when it needs to. `skills/web` wraps the
 [Obscura](https://github.com/h4ckf0r0day/obscura) browser as `page URL`.
 
-An agent answers by inserting its row into the result table, so a
-constraint or trigger your schema carries is the answer's receipt. There
-is no submit step and no separate API: SQLite is the contract.
+An agent answers by inserting its rows into the result table, and ends the
+attempt by ending a turn, so a constraint or trigger your schema carries is
+the answer's receipt. There is no submit step and no separate API: SQLite
+is the contract. `cites(source, quote)` is the check a cited row needs, that
+the quote is on the page the agent read, in one line of a trigger.
 
 Every script and page is a receipt in `bric_log`, numbered and kept with
 the script that produced it, so any result can be traced back to, and
