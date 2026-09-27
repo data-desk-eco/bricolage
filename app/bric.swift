@@ -43,8 +43,11 @@ final class Model: ObservableObject {
   }
   func load() {
     var db: OpaquePointer?
-    guard !path.isEmpty, sqlite3_open_v2(path, &db, SQLITE_OPEN_READONLY,
+    // a read-only open fails on a WAL db without a writable shm, so open
+    // read-write and forbid writes on the connection instead
+    guard !path.isEmpty, sqlite3_open_v2(path, &db, SQLITE_OPEN_READWRITE,
       nil) == SQLITE_OK else { return }
+    sqlite3_exec(db, "pragma query_only = 1", nil, nil, nil)
     defer { sqlite3_close(db) }
     let log = Dictionary(grouping: rows(db, Q), by: { $0[0] })
     // bric_log.job holds the brief
@@ -152,7 +155,7 @@ struct JobView: View {
           VStack(alignment: .leading) {
             ForEach(m.jobs) { JobView(m: m, job: $0) }
           }
-        }.frame(maxHeight: 420)
+        }.frame(maxHeight: 420).fixedSize(horizontal: false, vertical: true)
         Divider()
         HStack {
           Button("open db…") { m.open() }
