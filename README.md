@@ -98,4 +98,19 @@ runs in an image with GDAL while the rest use `sh`. Adding a tool is
 installing it where that executor can see it, and telling the model about
 it in the brief or a skill.
 
+## App
+
+`make app-install` puts Bricolage in /Applications: a menu bar item, a
+lowercase b, that watches one database. Each job shows its progress, the
+keys its target has out of the keys in its to-do table, and its latest
+attempts, from `bric_attempt`. A key typed under a job is inserted into
+its to-do table, and a failed one is retried, through Homebrew's `sqlite3`
+with the extension loaded and your shell's `BRIC_*` environment, so the app
+starts nothing the command line could not. It never writes the database
+itself and keeps no state but the path, and quitting it stops no worker.
+
+A job's name opens its result table and a key opens its row, with the
+session beside it: the brief, each reply, each script and the receipt it
+produced, as `bric_log` has them.
+
 Functions, tables, views and configuration are in [docs/api.md](docs/api.md).
