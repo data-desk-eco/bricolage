@@ -33,8 +33,7 @@ Returns true if the process exists. Used to detect active workers.
 ### `cites(source, quote)`
 
 Checks that `quote` occurs on the page at url `source`, in any read of it
-kept in `bric_fetch`. Urls match without scheme, `www.`, fragment or
-trailing slash; the quote is an FTS5 phrase, ignoring case, whitespace and
+kept in `bric_fetch`. Urls match without scheme or trailing slash; the quote is an FTS5 phrase, ignoring case, whitespace and
 punctuation. It returns 1 or raises an error that says what to fix: the
 page was never read, or the quote is not on it, with the nearest passage.
 A validation trigger is one line:
@@ -152,9 +151,6 @@ select rowid, snippet(bric_page, 0, '', '', ' ... ', 48)
 from bric_page
 where bric_page match 'methane';
 ```
-
-A database from before `bric_fetch` has its `page` receipts moved into it
-when the extension is next loaded.
 
 ## Progress: `bric_attempt`
 

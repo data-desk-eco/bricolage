@@ -121,8 +121,10 @@ static void cites(sqlite3_context *ctx, int argc, sqlite3_value **argv)
     for (int i = 0; i < 2; i++) sqlite3_bind_value(s, i + 1, argv[i]);
     sqlite3_step(s);
     const char *near = (const char *)sqlite3_column_text(s, 1);
-    char *e = sqlite3_column_type(s, 0) == SQLITE_NULL
-        ? sqlite3_mprintf("source %s is not a page you read: `page URL`, then cite that url", sqlite3_value_text(argv[0]))
+    const char *url = (const char *)sqlite3_column_text(s, 2);
+    char *e = url ? sqlite3_mprintf("source %s is a bric_fetch seq: cite its url, %s", sqlite3_value_text(argv[0]), url)
+        : sqlite3_column_type(s, 0) == SQLITE_NULL
+        ? sqlite3_mprintf("source %s is not the url of a page read here: `page URL`, then cite that url", sqlite3_value_text(argv[0]))
         : sqlite3_mprintf("quote not found on %s%s%s", sqlite3_value_text(argv[0]), near ? "; nearest: " : "", near ? near : "");
     sqlite3_finalize(s);
     sqlite3_result_error(ctx, e, -1);
@@ -437,7 +439,8 @@ static void turn(Attempt *a, const char *system, char **messages)
         sqlite3_free(id);
     }
     char *stop = q(NULL, sql_field, reply, "$", "stop_reason");
-    int paused = !n && stop && !strcmp(stop, "pause_turn");
+    /* deepseek ends a turn of only server searches with tool_use, not pause_turn */
+    int paused = !n && stop && (!strcmp(stop, "pause_turn") || !strcmp(stop, "tool_use"));
     sqlite3_free(stop);
     if (!n && !paused && !settled(a)) {
         char *text = q(NULL, sql_no_call, reply);
@@ -460,11 +463,10 @@ static void turn(Attempt *a, const char *system, char **messages)
 
 static void schema(void)
 {
-    char *old = q(NULL, "select 1 from sqlite_schema where name = 'bric_receipt'");
-    if (old) sqlite3_exec(L, "drop trigger if exists bric_page_index; drop table if exists bric_page", NULL, NULL, NULL);
-    sqlite3_exec(L, sql_schema, NULL, NULL, NULL);
-    if (old) sqlite3_exec(L, sql_receipts, NULL, NULL, NULL);
+    char *old = q(NULL, "select 1 from sqlite_schema where name = 'bric_page_index'");
+    if (old) sqlite3_exec(L, "drop view bric_receipt; drop trigger bric_page_index; drop table bric_page", NULL, NULL, NULL);
     sqlite3_free(old);
+    sqlite3_exec(L, sql_schema, NULL, NULL, NULL);
     sqlite3_exec(L, "alter table bric_job add column model text", NULL, NULL, NULL);
     sqlite3_exec(L, "alter table bric_job add column params text", NULL, NULL, NULL);
     sqlite3_exec(L, "alter table bric_job add column skills text", NULL, NULL, NULL);

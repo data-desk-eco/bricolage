@@ -79,7 +79,8 @@ class H(BaseHTTPRequestHandler):
         else:
             content = [{'type': 'text', 'text': 'giving up'}]
         time.sleep(0.2)
-        stop = 'pause_turn' if content[0]['type'] == 'server_tool_use' else 'tool_use'
+        # deepseek stops a turn of only server searches with tool_use
+        stop = 'tool_use' if content[0]['type'].endswith('tool_use') else 'end_turn'
         body = json.dumps({'content': content, 'stop_reason': stop, 'usage': {'input_tokens': 10, 'output_tokens': 5, 'cache_read_input_tokens': 1}}).encode()
         self.send_response(200)
         self.send_header('content-type', 'application/json')
