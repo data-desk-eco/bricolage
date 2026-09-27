@@ -1,7 +1,8 @@
 import json, os, subprocess, sys, threading, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-PAGE = 'https://example.org/acme\nAcme Ltd   is a wholly owned\n\n\tsubsidiary of   Globex Corporation. ' + 'filler text. ' * 3000
+URL = 'https://example.org/acme'
+PAGE = URL + '\nAcme Ltd   is a wholly owned\n\n\tsubsidiary of   Globex Corporation. ' + 'filler text. ' * 3000
 QUOTE = 'wholly owned\nsubsidiary of Globex Corporation'
 PNG = bytes.fromhex('89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d4944415478da63f8cfc0f01f0005000201cae1a5d90000000049454e44ae426082')
 PNG64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP4z8DwHwAFAAIByuGl2QAAAABJRU5ErkJggg=='
@@ -67,14 +68,14 @@ class H(BaseHTTPRequestHandler):
             assert results[-2].split('] ', 1)[1] == '[image/png, %d bytes]' % len(PNG), results[-2]
             assert last.split('] ', 1)[1].startswith('K=|D='), last
             assert last.endswith('\n2\n[exit 3]'), last
-            content = [sh('c4', 'cat f; sleep 5'), insert('c5', 'results', key=key, parent='Globex', confidence='certain', source=md, quote=quote)]
+            content = [sh('c4', 'cat f; sleep 5'), insert('c5', 'results', key=key, parent='Globex', confidence='certain', source=URL, quote=quote)]
         elif turn == 2:
             assert results[-2].endswith('] x\n[killed after timeout]'), results[-2]
             assert 'confidence' in last, last
-            content = [insert('c6', 'results', key=key, parent='Globex', confidence='high', source=md - 1, quote=quote)]
+            content = [insert('c6', 'results', key=key, parent='Globex', confidence='high', source=URL, quote='owned outright by Initech')]
         elif turn == 3:
             assert 'quote not found' in last, last
-            content = [insert('c7', 'results', key=key, parent='Globex', confidence='high', source=md, quote=quote)]
+            content = [insert('c7', 'results', key=key, parent='Globex', confidence='high', source=URL, quote=quote)]
         else:
             content = [{'type': 'text', 'text': 'giving up'}]
         time.sleep(0.2)
@@ -93,12 +94,12 @@ create table if not exists results (
   key text primary key,
   parent text not null,
   confidence text not null check (confidence in ('high', 'medium', 'low')),
-  source integer not null,
+  source text not null,
   quote text not null
 );
 create trigger if not exists results_cite before insert on results
 begin
-  select raise(abort, 'quote not found in source') where not cites(new.source, new.quote);
+  select cites(new.source, new.quote);
 end;
 select run('results', 'Resolve each operator to its parent.', key) from company where key not in (select key from results);
 '''
@@ -114,7 +115,7 @@ def main():
     base = 'http://127.0.0.1:%d' % server.server_port
     os.makedirs('test/out.bin', exist_ok=True)
     with open('test/out.bin/page', 'w') as f:
-        f.write("#!/bin/sh\ncat <<'EOF'\n%s\nEOF\n" % PAGE)
+        f.write("#!/bin/sh\ncat <<'EOF'\n%s\nEOF\ndb \"insert into bric_fetch (url, text) values ('%s', squeeze('%s'))\" >/dev/null\n" % (PAGE, URL, PAGE.split('\n', 1)[1]))
     os.chmod('test/out.bin/page', 0o755)
     os.environ['PATH'] = os.path.abspath('test/out.bin') + ':' + os.environ['PATH']
     os.environ.update(SQLITE=SQLITE, BRIC_SQLITE=SQLITE, BRIC_URL=base + '/v1/messages', BRIC_MODEL='fake', BRIC_KEY='secret', BRIC_TIMEOUT='2')
@@ -129,24 +130,23 @@ def main():
     for w, (out, err) in zip(workers, outs):
         assert not w.returncode, err
     r = sqlite('select key, parent, source, quote from results order by key;')
-    assert r.stdout == ''.join('%s|Globex|%s|wholly   owned\nsubsidiary of Globex Corporation\n' % (k, sqlite(
-        "select seq from bric_log where key = '%s' and kind = 'receipt' and tool = 'sh' order by seq limit 1;" % k).stdout.strip()) for k in ['acme', 'bolt', 'cog']), r.stdout
+    assert r.stdout == ''.join('%s|Globex|%s|wholly   owned\nsubsidiary of Globex Corporation\n' % (k, URL) for k in ['acme', 'bolt', 'cog']), r.stdout
     r = sqlite("select key, sum(kind = 'open'), sum(kind = 'close'), sum(kind = 'error') from bric_log where kind in ('open', 'close', 'error') group by 1 order by 1;")
     assert r.stdout in ('acme|1|1|0\nbolt|1|1|0\ncog|1|1|0\nplain|%d|0|%d\n' % (n, n) for n in (1, 2)), r.stdout
     r = sqlite("select count(*) from bric_log where kind = 'receipt' and text is null;")
     assert r.stdout == '0\n', r.stdout
     r = sqlite("select distinct detail from bric_log where key = 'plain' and kind = 'error';")
     assert r.stdout == 'reply without submission: no idea\n', r.stdout
-    r = sqlite("select count(*) from bric_page where bric_page match 'globex' and rowid in (select seq from bric_log where key = 'acme' and tool = 'sh');")
-    assert r.stdout == '1\n', r.stdout
+    r = sqlite("select count(*) = (select count(*) from bric_fetch), count(*) > 2 from bric_page where bric_page match 'globex';")
+    assert r.stdout == '1|1\n', r.stdout
     r = sqlite("select kind, input, output, calls, images, age < 60 from bric_attempt where key = 'acme';")
     assert r.stdout == 'close|50|25|7|1|1\n', r.stdout
     r = sqlite("select json_array_length(detail -> 'tools'), detail ->> 'shell', detail -> 'tools' ->> '$[1].name' from bric_log where key = 'acme' and kind = 'open';")
     assert r.stdout == '2|sh|sh\n', r.stdout
     r = sqlite("select instr(text, '  '), detail like '%chars: https://example.org/acme' from bric_log where key = 'acme' and kind = 'receipt' and tool = 'sh' order by seq limit 1;")
     assert r.stdout == '0|1\n', r.stdout
-    r = sqlite("select group_concat(ifnull(url, '-')) from (select url from bric_receipt join bric_log using (seq) where key = 'acme' and kind = 'receipt' order by seq limit 2);")
-    assert r.stdout == 'https://example.org/acme,-\n', r.stdout
+    r = sqlite("select group_concat(distinct url), min(instr(text, '  ')) from bric_fetch;")
+    assert r.stdout == URL + '|0\n', r.stdout
     r = sqlite("select detail like '%; 1 image % chars', text from bric_log where key = 'acme' and kind = 'receipt' and tool = 'sh' order by seq limit 1 offset 1;")
     assert r.stdout == '1|[image/png, %d bytes]\n' % len(PNG), r.stdout
     r = sqlite("select detail ->> 'command' from bric_log where key = 'acme' and kind = 'call' and tool = 'sh' order by seq limit 1 offset 3;")

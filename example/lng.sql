@@ -12,7 +12,7 @@ create table if not exists coast_terminal (
   status     text not null check (
     status in ('operating', 'under construction', 'fid', 'pre-fid')
   ),
-  source     integer not null,
+  source     text not null,
   quote      text not null,
   primary key (key, terminal),
   constraint "a plant, named as the industry names it"
@@ -23,9 +23,7 @@ drop trigger if exists coast_terminal_cite;
 create trigger coast_terminal_cite
 before insert on coast_terminal
 begin
-  select raise(abort, 'quote not found in source') where not cites(new.source, new.quote);
-  select raise(abort, 'source is not a page: cite the receipt `page URL` printed, which starts with its url')
-  where (select url from bric_receipt where seq = new.source) is null;
+  select cites(new.source, new.quote);
 end;
 
 create table if not exists terminal (key text primary key);
@@ -48,7 +46,7 @@ create table if not exists terminal_party (
   confidence text not null check (
     confidence in ('high', 'medium', 'low')
   ),
-  source     integer not null,
+  source     text not null,
   quote      text not null,
   run_at     text default (datetime('now')),
   primary key (key, role, company),
@@ -62,9 +60,7 @@ drop trigger if exists terminal_party_cite;
 create trigger terminal_party_cite
 before insert on terminal_party
 begin
-  select raise(abort, 'quote not found in source') where not cites(new.source, new.quote);
-  select raise(abort, 'source is not a page: cite the receipt `page URL` printed, which starts with its url')
-  where (select url from bric_receipt where seq = new.source) is null;
+  select cites(new.source, new.quote);
 end;
 
 insert or replace into bric_job (source, target, brief, skills, params) values (
@@ -84,7 +80,7 @@ Energy Monitor''s LNG terminal tracker, GIIGNL''s annual report, the IGU
 world LNG report, a regulator''s project list) and confirm each on its
 own page, and expect twenty rows for a large exporter.
 
-`source` is the receipt of the page you read it on and `quote` is a phrase
+`source` is the url of the page you read it on and `quote` is a phrase
 from that page naming the terminal, exactly as printed.',
   './skills/web',
   '{"max_tokens": 16384}'
@@ -104,9 +100,10 @@ main cryogenic heat exchangers, storage tanks) and marine works. `scope` says
 which trains or phase a contract covers, in a phrase. Prefer the contract award,
 the operator''s own page or a regulator''s filing over a news roundup.
 
-`source` is the receipt of the page you read it on and `quote` is a phrase
+`source` is the url of the page you read it on and `quote` is a phrase
 from that page naming the company in that role, exactly as printed. A role
-you cannot find is left out; a low-confidence row says why in `scope`.',
+you cannot find on two pages is left out; a low-confidence row says why in
+`scope`.',
   './skills/web',
   '{"max_tokens": 16384}'
 );

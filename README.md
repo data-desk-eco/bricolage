@@ -83,12 +83,13 @@ The Makefile checks `/opt/homebrew/opt/sqlite` for Homebrew SQLite.
 Each job specifies its source table, result table and research instructions
 (`brief`). Agents query the database and insert results with `db "SQL"`.
 Use table constraints and triggers to validate results; `cites(source, quote)`
-checks a quotation against stored tool output.
+checks a quotation against a page an agent has read, named by its url.
 
 Jobs can load [Agent Skills](https://agentskills.io) for additional
 instructions and scripts. Set `bric_job.skills` to a directory pattern such
 as `./skills/{archive,web}`. Skill scripts become shell commands; the web
-skill provides `page URL` to read a page through Obscura.
+skill provides `page URL` to read a page through Obscura, keeping it in
+`bric_fetch`.
 
 ## Sandbox
 

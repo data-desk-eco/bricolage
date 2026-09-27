@@ -8,14 +8,14 @@ create table if not exists company_parent (
   confidence text not null check (
     confidence in ('high', 'medium', 'low')
   ),
-  source     integer not null,
+  source     text not null,
   quote      text not null
 );
 
 create trigger if not exists company_parent_cite
 before insert on company_parent
 begin
-  select raise(abort, 'quote not found in source') where not cites(new.source, new.quote);
+  select cites(new.source, new.quote);
 end;
 
 insert or replace into bric_job (source, target, brief) values (

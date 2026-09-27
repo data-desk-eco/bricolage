@@ -32,13 +32,15 @@ Returns true if the process exists. Used to detect active workers.
 
 ### `cites(source, quote)`
 
-Checks whether `quote` occurs in the stored tool output with sequence number
-`source`. It uses an FTS5 phrase query, ignoring case, whitespace and
-punctuation. For example, a validation trigger can contain:
+Checks that `quote` occurs on the page at url `source`, in any read of it
+kept in `bric_fetch`. Urls match without scheme, `www.`, fragment or
+trailing slash; the quote is an FTS5 phrase, ignoring case, whitespace and
+punctuation. It returns 1 or raises an error that says what to fix: the
+page was never read, or the quote is not on it, with the nearest passage.
+A validation trigger is one line:
 
 ```sql
-select raise(abort, 'quote not found in source')
-where not cites(new.source, new.quote);
+select cites(new.source, new.quote);
 ```
 
 Connections inserting into a table with this trigger must load the
@@ -122,7 +124,7 @@ as JSON.
 | `open` | System prompt, first message, tools, shell, model, parameters and worker PID in `detail`. |
 | `reply` | Model response content in `detail`, including any thinking. |
 | `call` | Tool name in `tool`, arguments in `detail`. |
-| `receipt` | Tool result. Shell output is stored in `text`; `seq` can be cited as a source. |
+| `receipt` | Tool result. Shell output is stored in `text`. |
 | `close` | Successful completion, with result rows as a JSON array in `detail`. |
 | `error` | Failure reason in `detail`. |
 
@@ -130,26 +132,29 @@ The log uses `receipt` to mean a tool result. Triggers prevent updates and
 deletes. Removing those protections requires dropping `bric_log_update`
 and `bric_log_delete`.
 
-## Source text: `bric_receipt` and `bric_page`
+## Source text: `bric_fetch` and `bric_page`
 
-`bric_receipt` exposes log entries with stored text as `(seq, text, url)`.
-For recognized `page URL` calls, `url` contains the page URL; otherwise it
-is null. Join on `seq` to retrieve a cited source's URL:
+`bric_fetch (seq, ts, url, text)` holds every page read, one row per read,
+whole, however the agent piped the output; the web skill's `page` writes it.
+Join on the url to retrieve a cited source's text:
 
 ```sql
-select p.*, r.url
+select p.*, f.text
 from company_parent p
-join bric_receipt r on r.seq = p.source;
+join bric_fetch f on f.url = p.source;
 ```
 
-`bric_page` is an FTS5 index over that text, shared by all attempts. Its
-`rowid` is the source's log sequence number. Agents and users can search it:
+`bric_page` is an FTS5 index over that text, shared by all attempts, with
+`bric_fetch.seq` as its `rowid`. Agents and users can search it:
 
 ```sql
 select rowid, snippet(bric_page, 0, '', '', ' ... ', 48)
 from bric_page
 where bric_page match 'methane';
 ```
+
+A database from before `bric_fetch` has its `page` receipts moved into it
+when the extension is next loaded.
 
 ## Progress: `bric_attempt`
 

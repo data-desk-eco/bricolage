@@ -112,11 +112,21 @@ static void cites(sqlite3_context *ctx, int argc, sqlite3_value **argv)
 {
     (void)argc;
     sqlite3_stmt *s;
-    if (sqlite3_prepare_v2(sqlite3_context_db_handle(ctx), sql_cites, -1, &s, NULL)) return sqlite3_result_error(ctx, "cites: no bric_page", -1);
-    sqlite3_bind_value(s, 1, argv[1]);
-    sqlite3_bind_value(s, 2, argv[0]);
-    sqlite3_result_int(ctx, sqlite3_step(s) == SQLITE_ROW);
+    if (sqlite3_prepare_v2(sqlite3_context_db_handle(ctx), sql_cites, -1, &s, NULL)) return sqlite3_result_error(ctx, "cites: no bric_fetch", -1);
+    for (int i = 0; i < 2; i++) sqlite3_bind_value(s, i + 1, argv[i]);
+    int ok = sqlite3_step(s) == SQLITE_ROW;
     sqlite3_finalize(s);
+    if (ok) return sqlite3_result_int(ctx, 1);
+    sqlite3_prepare_v2(sqlite3_context_db_handle(ctx), sql_nearest, -1, &s, NULL);
+    for (int i = 0; i < 2; i++) sqlite3_bind_value(s, i + 1, argv[i]);
+    sqlite3_step(s);
+    const char *near = (const char *)sqlite3_column_text(s, 1);
+    char *e = sqlite3_column_type(s, 0) == SQLITE_NULL
+        ? sqlite3_mprintf("source %s is not a page you read: `page URL`, then cite that url", sqlite3_value_text(argv[0]))
+        : sqlite3_mprintf("quote not found on %s%s%s", sqlite3_value_text(argv[0]), near ? "; nearest: " : "", near ? near : "");
+    sqlite3_finalize(s);
+    sqlite3_result_error(ctx, e, -1);
+    sqlite3_free(e);
 }
 
 typedef struct { char *out; size_t n; } Buf;
@@ -450,7 +460,11 @@ static void turn(Attempt *a, const char *system, char **messages)
 
 static void schema(void)
 {
+    char *old = q(NULL, "select 1 from sqlite_schema where name = 'bric_receipt'");
+    if (old) sqlite3_exec(L, "drop trigger if exists bric_page_index; drop table if exists bric_page", NULL, NULL, NULL);
     sqlite3_exec(L, sql_schema, NULL, NULL, NULL);
+    if (old) sqlite3_exec(L, sql_receipts, NULL, NULL, NULL);
+    sqlite3_free(old);
     sqlite3_exec(L, "alter table bric_job add column model text", NULL, NULL, NULL);
     sqlite3_exec(L, "alter table bric_job add column params text", NULL, NULL, NULL);
     sqlite3_exec(L, "alter table bric_job add column skills text", NULL, NULL, NULL);
