@@ -4,16 +4,16 @@ on: [push, pull_request]
 permissions: {contents: write}
 jobs:
   build:
-    strategy: {matrix: {os: [ubuntu-latest, macos-latest]}}
+    strategy: {fail-fast: false, matrix: {os: [ubuntu-latest, macos-latest]}}
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - if: runner.os == 'Linux'
-        run: sudo apt-get install -y libsqlite3-dev libcurl4-openssl-dev sqlite3
+        run: sudo apt-get update && sudo apt-get install -y libsqlite3-dev libcurl4-openssl-dev sqlite3
       - if: runner.os == 'macOS'
         run: brew install sqlite && make app
       - run: make test
-      - run: tar czf bric-$(uname -s)-$(uname -m).tar.gz ext/bric.* ext/bric-app 2>/dev/null || tar czf bric-$(uname -s)-$(uname -m).tar.gz ext/bric.*
+      - run: tar czf bric-$(uname -s)-$(uname -m).tar.gz $(ls ext/bric.* ext/bric-app 2>/dev/null)
       - if: startsWith(github.ref, 'refs/tags/v')
         env: {GH_TOKEN: '${{ github.token }}'}
         run: |
