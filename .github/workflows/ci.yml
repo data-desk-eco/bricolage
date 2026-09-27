@@ -13,9 +13,8 @@ jobs:
       - if: runner.os == 'macOS'
         run: brew install sqlite
       - run: make test
-      - run: for e in ext/bric.*; do cp $e bric-$(uname -m).${e##*.}; done
       - if: startsWith(github.ref, 'refs/tags/v')
         env: {GH_TOKEN: '${{ github.token }}'}
         run: |
           gh release create $GITHUB_REF_NAME --generate-notes 2>/dev/null || :
-          gh release upload $GITHUB_REF_NAME bric-*.* --clobber
+          gh release upload $GITHUB_REF_NAME ext/bric.* --clobber
