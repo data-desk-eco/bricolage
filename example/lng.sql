@@ -102,8 +102,7 @@ the operator''s own page or a regulator''s filing over a news roundup.
 
 `source` is the url of the page you read it on and `quote` is a phrase
 from that page naming the company in that role, exactly as printed. A role
-you cannot find on two pages is left out; a low-confidence row says why in
-`scope`.',
+you cannot find is left out; a low-confidence row says why in `scope`.',
   './skills/web',
   '{"max_tokens": 16384}'
 );
