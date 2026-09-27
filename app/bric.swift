@@ -4,7 +4,9 @@ import SwiftUI
 import SQLite3
 
 struct Row: Identifiable { let id: String, key, state: String, age, pages: Int }
-struct Job: Identifiable { let id: String; var rows: [Row], total: Int }
+struct Job: Identifiable {
+  let id, target: String; var rows: [Row], total: Int
+}
 
 let Q = """
 with l as (select job, key, attempt, kind, ts from bric_log
@@ -19,9 +21,13 @@ from l join t on l.job = t.job and l.key = t.key and attempt = a
 group by 1, 2 order by min(ts) desc
 """
 
-func rows(_ db: OpaquePointer?, _ sql: String) -> [[String]] {
+// with head, the first row is the column names
+func rows(_ db: OpaquePointer?, _ sql: String, head: Bool = false)
+  -> [[String]] {
   var s: OpaquePointer?, out: [[String]] = []
   guard sqlite3_prepare_v2(db, sql, -1, &s, nil) == SQLITE_OK else { return [] }
+  if head { out.append((0..<sqlite3_column_count(s)).map {
+    String(cString: sqlite3_column_name(s, $0)) }) }
   while sqlite3_step(s) == SQLITE_ROW {
     out.append((0..<sqlite3_column_count(s)).map {
       sqlite3_column_text(s, $0).map { String(cString: $0) } ?? "" })
@@ -41,6 +47,14 @@ final class Model: ObservableObject {
       _ in self?.load() }
     load()
   }
+  func table(_ t: String) -> [[String]] {
+    var db: OpaquePointer?
+    guard sqlite3_open_v2(path, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK
+      else { return [] }
+    defer { sqlite3_close(db) }
+    sqlite3_exec(db, "pragma query_only = 1", nil, nil, nil)
+    return rows(db, "select * from \"\(t)\"", head: true)
+  }
   func load() {
     var db: OpaquePointer?
     // a read-only open fails on a WAL db without a writable shm, so open
@@ -51,9 +65,9 @@ final class Model: ObservableObject {
     defer { sqlite3_close(db) }
     let log = Dictionary(grouping: rows(db, Q), by: { $0[0] })
     // bric_log.job holds the brief
-    jobs = rows(db, "select source, brief from bric_job").map { j in
+    jobs = rows(db, "select source, brief, target from bric_job").map { j in
       let n = rows(db, "select count(*) from \(j[0])").first?[0] ?? "0"
-      return Job(id: j[0], rows: (log[j[1]] ?? []).map {
+      return Job(id: j[0], target: j[2], rows: (log[j[1]] ?? []).map {
         Row(id: $0[1], key: $0[1], state: $0[2], age: Int($0[3]) ?? 0,
             pages: Int($0[4]) ?? 0) }, total: Int(n) ?? 0)
     }
@@ -108,6 +122,7 @@ struct Dot: View {
 
 struct JobView: View {
   @ObservedObject var m: Model
+  @Environment(\.openWindow) var win
   let job: Job
   @State var open = true
   @State var text = ""
@@ -133,12 +148,38 @@ struct JobView: View {
         .onSubmit { m.add(job.id, text); text = "" }
     } label: {
       HStack {
-        Text(job.id).font(.system(.body, design: .monospaced).bold())
+        Button { NSApp.activate(ignoringOtherApps: true)
+          win(value: job.target) } label: {
+          Text(job.id).font(.system(.body, design: .monospaced).bold())
+        }.buttonStyle(.plain).help("open \(job.target)")
         ProgressView(value: Double(done), total: Double(max(job.total, 1)))
         Text("\(done)/\(job.total)").monospacedDigit()
           .foregroundStyle(.secondary)
       }
     }
+  }
+}
+
+// a result table, re-read every two seconds while open
+struct DataView: View {
+  let m: Model, t: String
+  @State var d: [[String]] = []
+  var body: some View {
+    ScrollView([.horizontal, .vertical]) {
+      Grid(alignment: .topLeading, horizontalSpacing: 16, verticalSpacing: 6) {
+        ForEach(d.indices, id: \.self) { i in
+          GridRow { ForEach(d[i].indices, id: \.self) {
+            Text(d[i][$0]).lineLimit(3).frame(maxWidth: 360,
+              alignment: .leading).fontWeight(i == 0 ? .bold : .regular)
+          } }
+          if i == 0 { Divider() }
+        }
+      }.font(.system(size: 11, design: .monospaced)).textSelection(.enabled)
+        .padding()
+    }.navigationTitle("\(t) · \(max(d.count - 1, 0)) rows")
+      .frame(minWidth: 500, minHeight: 300)
+      .task { while !Task.isCancelled {
+        d = m.table(t); try? await Task.sleep(for: .seconds(2)) } }
   }
 }
 
@@ -167,5 +208,7 @@ struct JobView: View {
       Image(systemName: n > 0 ? "circle.dotted.circle" : "circle.circle")
       if n > 0 { Text("\(n)") }
     }.menuBarExtraStyle(.window)
+    WindowGroup(for: String.self) { $t in
+      if let t { DataView(m: m, t: t) } }.defaultLaunchBehavior(.suppressed)
   }
 }
