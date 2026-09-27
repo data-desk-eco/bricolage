@@ -106,15 +106,12 @@ func ago(_ s: Int) -> String { s < 60 ? "\(s)s" : s < 3600 ? "\(s / 60)m"
 
 struct Dot: View {
   let state: String
-  @State var on = false
   var body: some View {
     Group {
       switch state {
       case "done": Image(systemName: "circle.fill")
       case "failed": Image(systemName: "xmark")
-      default: Image(systemName: "circle.dotted").opacity(on ? 0.3 : 1)
-        .onAppear { withAnimation(.easeInOut(duration: 0.8)
-          .repeatForever()) { on = true } }
+      default: Image(systemName: "circle.dotted").symbolEffect(.pulse)
       }
     }.font(.system(size: 8, weight: .bold)).frame(width: 12)
   }
@@ -192,11 +189,7 @@ struct DataView: View {
       VStack(alignment: .leading, spacing: 8) {
         Text(m.path.isEmpty ? "no db" : (m.path as NSString).lastPathComponent)
           .font(.headline)
-        ScrollView {
-          VStack(alignment: .leading) {
-            ForEach(m.jobs) { JobView(m: m, job: $0) }
-          }
-        }.frame(maxHeight: 420).fixedSize(horizontal: false, vertical: true)
+        ForEach(m.jobs) { JobView(m: m, job: $0) }
         Divider()
         HStack {
           Button("open db…") { m.open() }
