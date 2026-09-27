@@ -60,6 +60,8 @@ final class Model: ObservableObject {
   // their command
   func log(_ t: String, _ key: String) -> [[String]] { read("""
     select seq, attempt, turn, kind, case kind
+      when 'open' then concat_ws(char(10) || char(10), detail ->> 'system',
+        detail ->> 'message', 'model ' || nullif(detail ->> 'model', ''))
       when 'reply' then (select group_concat(coalesce(value ->> 'thinking',
         value ->> 'text'), char(10) || char(10)) from json_each(detail)
         where value ->> 'type' in ('thinking', 'text'))
@@ -139,12 +141,15 @@ struct JobView: View {
     DisclosureGroup(isExpanded: $open) {
       ForEach(job.rows.prefix(12)) { r in
         HStack(spacing: 6) {
-          Dot(state: r.state)
+          Button { NSApp.activate(ignoringOtherApps: true)
+            win(value: Open(t: job.target, key: r.key)) } label: {
+          HStack(spacing: 6) { Dot(state: r.state)
           Text(r.key).lineLimit(1).truncationMode(.middle)
           Spacer()
           Text("\(r.calls)c").foregroundStyle(.secondary)
           Text(ago(r.age)).foregroundStyle(.secondary)
             .frame(width: 30, alignment: .trailing)
+          }.contentShape(Rectangle()) }.buttonStyle(.plain)
           if r.state == "failed" {
             Button { m.retry(job.id, r.key) } label: {
               Image(systemName: "arrow.clockwise") }.buttonStyle(.plain)
@@ -157,7 +162,7 @@ struct JobView: View {
     } label: {
       HStack {
         Button { NSApp.activate(ignoringOtherApps: true)
-          win(value: job.target) } label: {
+          win(value: Open(t: job.target, key: nil)) } label: {
           Text(job.id).font(.system(.body, design: .monospaced).bold())
         }.buttonStyle(.plain).help("open \(job.target)")
         ProgressView(value: Double(job.done), total: Double(max(job.total, 1)))
@@ -170,23 +175,29 @@ struct JobView: View {
 
 // a result table in a native Table, re-read every two seconds while open
 struct Rec: Identifiable { let id: Int, v: [String] }
+// a window's table and the key whose session it shows
+struct Open: Codable, Hashable { var t: String, key: String? }
 struct DataView: View {
   let m: Model, t: String
+  @State var key: String?
   @State var d: [[String]] = []
   @State var sel: Int?
   var body: some View {
-    let h = d.first ?? [], r = d.dropFirst().enumerated().map {
-      Rec(id: $0, v: $1) }
-    let key = sel.flatMap { i in r.first { $0.id == i } }?.v.first
+    let h = d.first ?? [], k = h.firstIndex(of: "key") ?? 0,
+      r = d.dropFirst().enumerated().map { Rec(id: $0, v: $1) }
     Table(r, selection: $sel) {
       TableColumnForEach(h.indices, id: \.self) { i in
         TableColumn(h[i]) { Text($0.v[i]).help($0.v[i]) }
       }
     }.font(.system(size: 11, design: .monospaced))
-      .inspector(isPresented: .constant(key != nil)) {
+      .inspector(isPresented: .init(get: { key != nil },
+        set: { if !$0 { key = nil; sel = nil } })) {
         if let key { Log(m: m, t: t, key: key).id(key)
           .inspectorColumnWidth(min: 300, ideal: 460) }
       }
+      .onChange(of: sel) { if let s = sel { key = r[s].v[k] } }
+      .onChange(of: d.count) { if sel == nil, let key {
+        sel = r.firstIndex { $0.v[k] == key } } }
       .navigationTitle("\(t) · \(r.count) rows")
       .frame(minWidth: 500, minHeight: 300)
       .task { while !Task.isCancelled {
@@ -209,14 +220,22 @@ struct Log: View {
             .foregroundStyle(.secondary)
         }.font(.system(size: 10, design: .monospaced))
         Text(e[4]).font(.system(size: 11,
-          design: e[3] == "reply" ? .default : .monospaced))
-          .lineLimit(e[3] == "receipt" ? 8 : 40).textSelection(.enabled)
+          design: ["reply", "open"].contains(e[3]) ? .default : .monospaced))
+          .lineLimit(e[3] == "receipt" ? 8 : e[3] == "open" ? nil : 40).textSelection(.enabled)
       }.padding(.vertical, 2)
     }.navigationTitle(key)
       .task { while !Task.isCancelled {
         l = m.log(t, key); try? await Task.sleep(for: .seconds(2)) } }
   }
 }
+
+// a menu bar label ignores its font, so the b is drawn into a template
+let logo = {
+  let s = NSAttributedString(string: "b", attributes: [.font:
+    NSFont.monospacedSystemFont(ofSize: 16, weight: .semibold)])
+  let i = NSImage(size: s.size(), flipped: false) { s.draw(in: $0); return true }
+  i.isTemplate = true; return i
+}()
 
 @main struct Bric: App {
   @StateObject var m = Model()
@@ -236,10 +255,10 @@ struct Log: View {
         }.buttonStyle(.plain).foregroundStyle(.secondary)
       }.padding(12).frame(width: 340)
     } label: {
-      Image(systemName: n > 0 ? "circle.dotted.circle" : "circle.circle")
+      Image(nsImage: logo)
       if n > 0 { Text("\(n)") }
     }.menuBarExtraStyle(.window)
-    WindowGroup(for: String.self) { $t in
-      if let t { DataView(m: m, t: t) } }.defaultLaunchBehavior(.suppressed)
+    WindowGroup(for: Open.self) { $o in
+      if let o { DataView(m: m, t: o.t, key: o.key) } }.defaultLaunchBehavior(.suppressed)
   }
 }
