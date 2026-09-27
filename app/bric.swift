@@ -147,7 +147,7 @@ struct JobView: View {
       ForEach(job.rows.prefix(12)) { r in
         HStack(spacing: 6) {
           Button { NSApp.activate(ignoringOtherApps: true)
-            win(value: Open(t: job.target, key: r.key)) } label: {
+            win(id: "log", value: Open(t: job.target, key: r.key)) } label: {
           HStack(spacing: 6) { Dot(state: r.state)
           Text(r.key).lineLimit(1).truncationMode(.middle)
           Spacer()
@@ -200,7 +200,7 @@ struct DataView: View {
       }
     }.font(.system(size: 11, design: .monospaced))
       .onChange(of: sel) { if let s = sel, r.indices.contains(s) {
-        win(value: Open(t: t, key: r[s].v[k])) } }
+        win(id: "log", value: Open(t: t, key: r[s].v[k])) } }
       .navigationTitle("\(t) · \(r.count) rows")
       .frame(minWidth: 500, minHeight: 300)
       .task { while !Task.isCancelled {
@@ -270,7 +270,9 @@ let logo = {
       if n > 0 { Text("\(n)") }
     }.menuBarExtraStyle(.window)
     WindowGroup(for: Open.self) { $o in
-      if let o { if let k = o.key { Log(m: m, t: o.t, key: k) }
-        else { DataView(m: m, t: o.t) } } }.defaultLaunchBehavior(.suppressed)
+      if let o { DataView(m: m, t: o.t) } }.defaultLaunchBehavior(.suppressed)
+    WindowGroup(id: "log", for: Open.self) { $o in
+      if let o, let k = o.key { Log(m: m, t: o.t, key: k) } }
+      .defaultSize(width: 420, height: 760).defaultLaunchBehavior(.suppressed)
   }
 }
