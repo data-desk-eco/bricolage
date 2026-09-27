@@ -79,8 +79,13 @@ final class Model: ObservableObject {
       let (s, t) = ("\"\(j[0])\"", "\"\(j[1])\""), n = read("""
         select count(*) filter (where key in (select key from \(t))),
           count(*) from \(s)
-        """).first ?? ["0", "0"]
-      return Job(id: j[0], target: j[1], rows: (log[j[1]] ?? []).map {
+        """).first ?? ["0", "0"], l = log[j[1]] ?? []
+      // keys with no attempt yet wait for a free worker
+      let ks = Set(l.map { $0[1] }), w = read("""
+        select key from \(s) where key not in (select key from \(t))
+        """).map { $0[0] }.filter { !ks.contains($0) }
+      return Job(id: j[0], target: j[1], rows: w.map {
+        Row(id: $0, key: $0, state: "queued", age: 0, calls: 0) } + l.map {
         Row(id: $0[1], key: $0[1], state: $0[2], age: Int($0[3]) ?? 0,
             calls: Int($0[4]) ?? 0) }, done: Int(n[0]) ?? 0,
         total: Int(n[1]) ?? 0)
@@ -130,6 +135,7 @@ struct Dot: View {
       switch state {
       case "done": Image(systemName: "circle.fill")
       case "failed": Image(systemName: "xmark")
+      case "queued": Image(systemName: "circle")
       default: Image(systemName: "circle.dotted").symbolEffect(.pulse)
       }
     }.font(.system(size: 8, weight: .bold)).frame(width: 12)
@@ -151,9 +157,11 @@ struct JobView: View {
           HStack(spacing: 6) { Dot(state: r.state)
           Text(r.key).lineLimit(1).truncationMode(.middle)
           Spacer()
-          Text("\(r.calls)c").foregroundStyle(.secondary)
-          Text(ago(r.age)).foregroundStyle(.secondary)
-            .frame(width: 30, alignment: .trailing)
+          if r.state != "queued" {
+            Text("\(r.calls)c").foregroundStyle(.secondary)
+            Text(ago(r.age)).foregroundStyle(.secondary)
+              .frame(width: 30, alignment: .trailing)
+          }
           }.contentShape(Rectangle()) }.buttonStyle(.plain)
           if r.state == "failed" {
             Button { m.retry(job.id, r.key) } label: {
