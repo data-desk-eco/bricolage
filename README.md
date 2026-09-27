@@ -11,6 +11,9 @@ Use Bricolage to enrich existing datasets (e.g. take a list of LNG terminal
 names, find their operators) or to perform repeated research tasks with a
 full audit chain.
 
+![The data window: a job's result table, and the session of the selected
+row beside it](docs/app.png)
+
 ## Build
 
     make            # ext/bric.dylib or ext/bric.so
