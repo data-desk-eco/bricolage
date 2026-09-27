@@ -1,4 +1,4 @@
-# Bricolage
+# bricolage
 
 Bricolage is a SQLite extension for researching and enriching datasets with
 LLM agents. Add rows to a source table, and agents research each one using
