@@ -66,9 +66,9 @@ Other examples:
 - [lng.sql](example/lng.sql): finds LNG export terminals, then uses a trigger
   to start a second job researching their owners and suppliers.
 - [ch4id.sql](example/ch4id.sql): identifies sites responsible for methane plumes.
-- [cargo.sql](example/cargo.sql): lists the oil and gas cargoes in a leak on
-  an [Aleph](https://docs.aleph.occrp.org) server, then fills in each one's
-  parties, ports and dates, citing Aleph entities through the `aleph` skill
+- [cargo.sql](example/cargo.sql): finds leads to oil and gas cargoes in a
+  leak on an [Aleph](https://docs.aleph.occrp.org) server, then works out
+  each one's vessel, parties, ports and dates, keyed by a plain id, citing Aleph entities through the `aleph` skill
   (set `ALEPH_URL` and `ALEPH_API_KEY`).
 
 ## Build
