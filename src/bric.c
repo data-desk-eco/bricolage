@@ -122,7 +122,7 @@ static void cites(sqlite3_context *ctx, int argc, sqlite3_value **argv)
     sqlite3_step(s);
     const char *near = (const char *)sqlite3_column_text(s, 1);
     const char *url = (const char *)sqlite3_column_text(s, 2);
-    char *e = url ? sqlite3_mprintf("source %s is a bric_fetch seq: cite its url, %s", sqlite3_value_text(argv[0]), url)
+    char *e = url ? sqlite3_mprintf("source %s is a rowid: cite its url, %s", sqlite3_value_text(argv[0]), url)
         : sqlite3_column_type(s, 0) == SQLITE_NULL
         ? sqlite3_mprintf("source %s is not the url of a page read here: `page URL`, then cite that url", sqlite3_value_text(argv[0]))
         : sqlite3_mprintf("quote not found on %s%s%s", sqlite3_value_text(argv[0]), near ? "; nearest: " : "", near ? near : "");

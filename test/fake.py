@@ -40,13 +40,13 @@ class H(BaseHTTPRequestHandler):
         blocks = [c['content'] for m in req['messages'] if m['role'] == 'user' and isinstance(m['content'], list) for c in m['content']]
         results = [b[0]['text'] if isinstance(b, list) else b for b in blocks]
         last = results[-1] if results else ''
-        md = next((int(r.split(']')[0][5:]) for r in results if r.startswith('[seq ') and QUOTE in r), None)
+        md = any(QUOTE in r for r in results)
         quote = 'wholly   owned\nsubsidiary of Globex Corporation'
         if req['system'].startswith('bare shell'):
             if turn == 0:
                 content = [sh('b1', 'echo "X=$X"')]
             elif turn == 1:
-                assert last.endswith('] X=1'), last
+                assert last == 'X=1', last
                 content = [sh('b2', 'db "insert into bare values (\'%s\', cast(\'Globex\' as blob))"' % key)]
             elif turn == 2:
                 content = [sh('b3', 'db "begin; insert into bare values (\'x\', \'y\'); insert into bare values (\'x\', \'z\'); commit;"')]
@@ -65,12 +65,12 @@ class H(BaseHTTPRequestHandler):
             assert md, results
             images = [x['source'] for b in blocks if isinstance(b, list) for x in b[1:]]
             assert images == [{'type': 'base64', 'media_type': 'image/png', 'data': PNG64}], images
-            assert results[-2].split('] ', 1)[1] == '[image/png, %d bytes]' % len(PNG), results[-2]
-            assert last.split('] ', 1)[1].startswith('K=|D='), last
+            assert results[-2] == '[image/png, %d bytes]' % len(PNG), results[-2]
+            assert last.startswith('K=|D='), last
             assert last.endswith('\n2\n[exit 3]'), last
             content = [sh('c4', 'cat f; sleep 5'), insert('c5', 'results', key=key, parent='Globex', confidence='certain', source=URL, quote=quote)]
         elif turn == 2:
-            assert results[-2].endswith('] x\n[killed after timeout]'), results[-2]
+            assert results[-2] == 'x\n[killed after timeout]', results[-2]
             assert 'confidence' in last, last
             content = [insert('c6', 'results', key=key, parent='Globex', confidence='high', source=URL, quote='owned outright by Initech')]
         elif turn == 3:

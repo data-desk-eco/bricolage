@@ -133,7 +133,7 @@ and `bric_log_delete`.
 
 ## Source text: `bric_fetch` and `bric_page`
 
-`bric_fetch (seq, ts, url, text)` holds every page read, one row per read,
+`bric_fetch (ts, url, text)` holds every page read, one row per read,
 whole, however the agent piped the output; the web skill's `page` writes it.
 Join on the url to retrieve a cited source's text:
 
@@ -144,7 +144,7 @@ join bric_fetch f on f.url = p.source;
 ```
 
 `bric_page` is an FTS5 index over that text, shared by all attempts, with
-`bric_fetch.seq` as its `rowid`. Agents and users can search it:
+the same `rowid`. Agents and users can search it:
 
 ```sql
 select rowid, snippet(bric_page, 0, '', '', ' ... ', 48)
