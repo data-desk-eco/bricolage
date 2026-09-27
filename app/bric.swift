@@ -184,11 +184,11 @@ struct JobView: View {
 
 // a result table in a native Table, re-read every two seconds while open
 struct Rec: Identifiable { let id: Int, v: [String] }
-// a window's table and the key whose session it shows
+// a window's table and, for a transcript window, the key whose session it shows
 struct Open: Codable, Hashable { var t: String, key: String? }
 struct DataView: View {
   let m: Model, t: String
-  @State var key: String?
+  @Environment(\.openWindow) var win
   @State var d: [[String]] = []
   @State var sel: Int?
   var body: some View {
@@ -199,14 +199,8 @@ struct DataView: View {
         TableColumn(h[i]) { Text($0.v[i]).help($0.v[i]) }
       }
     }.font(.system(size: 11, design: .monospaced))
-      .inspector(isPresented: .init(get: { key != nil },
-        set: { if !$0 { key = nil; sel = nil } })) {
-        if let key { Log(m: m, t: t, key: key).id(key)
-          .inspectorColumnWidth(min: 300, ideal: 460) }
-      }
-      .onChange(of: sel) { if let s = sel, r.indices.contains(s) { key = r[s].v[k] } }
-      .onChange(of: d.count) { if sel == nil, let key {
-        sel = r.firstIndex { $0.v[k] == key } } }
+      .onChange(of: sel) { if let s = sel, r.indices.contains(s) {
+        win(value: Open(t: t, key: r[s].v[k])) } }
       .navigationTitle("\(t) · \(r.count) rows")
       .frame(minWidth: 500, minHeight: 300)
       .task { while !Task.isCancelled {
@@ -240,7 +234,7 @@ struct Log: View {
           design: ["reply", "open"].contains(e[3]) ? .default : .monospaced))
           .lineLimit(full.contains(e[0]) || !long ? nil : cut).textSelection(.enabled)
       }.padding(.vertical, 2)
-    }.navigationTitle(key)
+    }.navigationTitle(key).frame(minWidth: 360, minHeight: 300)
       .task { while !Task.isCancelled {
         l = m.log(t, key); try? await Task.sleep(for: .seconds(2)) } }
   }
@@ -276,6 +270,7 @@ let logo = {
       if n > 0 { Text("\(n)") }
     }.menuBarExtraStyle(.window)
     WindowGroup(for: Open.self) { $o in
-      if let o { DataView(m: m, t: o.t, key: o.key) } }.defaultLaunchBehavior(.suppressed)
+      if let o { if let k = o.key { Log(m: m, t: o.t, key: k) }
+        else { DataView(m: m, t: o.t) } } }.defaultLaunchBehavior(.suppressed)
   }
 }
