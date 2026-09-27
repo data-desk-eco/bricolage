@@ -1,0 +1,21 @@
+# test on every push; a v* tag also publishes the builds as a release
+name: ci
+on: [push, pull_request]
+permissions: {contents: write}
+jobs:
+  build:
+    strategy: {matrix: {os: [ubuntu-latest, macos-latest]}}
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - if: runner.os == 'Linux'
+        run: sudo apt-get install -y libsqlite3-dev libcurl4-openssl-dev sqlite3
+      - if: runner.os == 'macOS'
+        run: brew install sqlite && make app
+      - run: make test
+      - run: tar czf bric-$(uname -s)-$(uname -m).tar.gz ext/bric.* ext/bric-app 2>/dev/null || tar czf bric-$(uname -s)-$(uname -m).tar.gz ext/bric.*
+      - if: startsWith(github.ref, 'refs/tags/v')
+        env: {GH_TOKEN: '${{ github.token }}'}
+        run: |
+          gh release create $GITHUB_REF_NAME --generate-notes 2>/dev/null || :
+          gh release upload $GITHUB_REF_NAME bric-*.tar.gz --clobber
