@@ -51,7 +51,8 @@ create table if not exists cargo_fact (
     field in ('vessel', 'commodity', 'quantity', 'seller', 'buyer',
               'shipper', 'consignee', 'notify party', 'charterer',
               'shipowner', 'load port', 'discharge port', 'load date',
-              'discharge date', 'price', 'contract', 'bank', 'inspector', 'agent')
+              'discharge date', 'price', 'contract', 'bank', 'inspector',
+              'agent')
   ),
   value      text not null,
   source     text not null,

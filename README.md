@@ -68,8 +68,9 @@ Other examples:
 - [ch4id.sql](example/ch4id.sql): identifies sites responsible for methane plumes.
 - [cargo.sql](example/cargo.sql): finds leads to oil and gas cargoes in a
   leak on an [Aleph](https://docs.aleph.occrp.org) server, then works out
-  each one's vessel, parties, ports and dates, keyed by a plain id, citing Aleph entities through the `aleph` skill
-  (set `ALEPH_URL` and `ALEPH_API_KEY`).
+  each one's vessel, parties, ports and dates, keyed by a plain id, citing
+  Aleph entities through the `aleph` skill (set `ALEPH_URL` and
+  `ALEPH_API_KEY`).
 
 ## Build
 
