@@ -261,7 +261,7 @@ let logo = {
   @StateObject var m = Model()
   init() { NSApplication.shared.setActivationPolicy(.accessory) }
   var body: some Scene {
-    let n = m.jobs.flatMap(\.rows).filter { $0.state == "running" }.count
+    let n = m.jobs.reduce(0) { $0 + $1.total - $1.done }
     MenuBarExtra {
       VStack(alignment: .leading, spacing: 8) {
         Text(m.path.isEmpty ? "no db" : (m.path as NSString).lastPathComponent)
