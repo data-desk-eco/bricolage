@@ -3,22 +3,18 @@
 import SwiftUI
 import SQLite3
 
-struct Row: Identifiable { let id: String, key, state: String, age, pages: Int }
+struct Row: Identifiable { let id: String, key, state: String, age, calls: Int }
 struct Job: Identifiable {
-  let id, target: String; var rows: [Row], total: Int
+  let id, target: String; var rows: [Row], done, total: Int
 }
 
+// a key's latest attempt, its job named by target even in logs from
+// before the engine stopped naming jobs by their brief
 let Q = """
-with l as (select job, key, attempt, kind, ts from bric_log
-  where kind in ('open', 'close', 'error')),
-t as (select job, key, max(attempt) as a from l group by 1, 2)
-select l.job, l.key, case when sum(kind = 'close') then 'done'
-  when sum(kind = 'error') then 'failed' else 'running' end,
-  cast((julianday('now') - julianday(min(ts))) * 86400 as int),
-  (select count(*) from bric_log as r where r.job = l.job
-    and r.key = l.key and r.kind = 'receipt')
-from l join t on l.job = t.job and l.key = t.key and attempt = a
-group by 1, 2 order by min(ts) desc
+select coalesce(j.target, a.job), a.key, case a.kind when 'close' then 'done'
+  when 'error' then 'failed' else 'running' end, a.age, a.calls
+from bric_attempt as a left join bric_job as j on a.job = j.brief
+order by a.ts desc
 """
 
 // with head, the first row is the column names
@@ -47,48 +43,45 @@ final class Model: ObservableObject {
       _ in self?.load() }
     load()
   }
-  func table(_ t: String) -> [[String]] {
+  // a read-only open fails on a WAL db without a writable shm, so open
+  // read-write and forbid writes on the connection instead
+  func read(_ sql: String, head: Bool = false) -> [[String]] {
     var db: OpaquePointer?
-    guard sqlite3_open_v2(path, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK
-      else { return [] }
+    guard !path.isEmpty, sqlite3_open_v2(path, &db, SQLITE_OPEN_READWRITE,
+      nil) == SQLITE_OK else { return [] }
     defer { sqlite3_close(db) }
     sqlite3_exec(db, "pragma query_only = 1", nil, nil, nil)
-    return rows(db, "select * from \"\(t)\"", head: true)
+    return rows(db, sql, head: head)
+  }
+  func table(_ t: String) -> [[String]] {
+    read("select * from \"\(t)\"", head: true)
   }
   // one key's log in order, replies as their thinking and text, calls as
   // their command
-  func log(_ t: String, _ key: String) -> [[String]] {
-    var db: OpaquePointer?
-    guard sqlite3_open_v2(path, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK
-      else { return [] }
-    defer { sqlite3_close(db) }
-    sqlite3_exec(db, "pragma query_only = 1", nil, nil, nil)
-    return rows(db, """
-      select seq, attempt, turn, kind, case kind
-        when 'reply' then (select group_concat(coalesce(value ->> 'thinking',
-          value ->> 'text'), char(10) || char(10)) from json_each(detail)
-          where value ->> 'type' in ('thinking', 'text'))
-        when 'call' then coalesce(detail ->> 'command', detail)
-        else coalesce(text, detail) end
-      from bric_log where key = \(q(key)) and job in (\(q(t)),
-        (select brief from bric_job where target = \(q(t)))) order by seq
-      """)
-  }
+  func log(_ t: String, _ key: String) -> [[String]] { read("""
+    select seq, attempt, turn, kind, case kind
+      when 'reply' then (select group_concat(coalesce(value ->> 'thinking',
+        value ->> 'text'), char(10) || char(10)) from json_each(detail)
+        where value ->> 'type' in ('thinking', 'text'))
+      when 'call' then coalesce(detail ->> 'command', detail)
+      else coalesce(text, detail) end
+    from bric_log where key = \(q(key)) and job in (\(q(t)),
+      (select brief from bric_job where target = \(q(t)))) order by seq
+    """) }
+  // a key is done when its target has a row for it, as the engine counts
   func load() {
-    var db: OpaquePointer?
-    // a read-only open fails on a WAL db without a writable shm, so open
-    // read-write and forbid writes on the connection instead
-    guard !path.isEmpty, sqlite3_open_v2(path, &db, SQLITE_OPEN_READWRITE,
-      nil) == SQLITE_OK else { return }
-    sqlite3_exec(db, "pragma query_only = 1", nil, nil, nil)
-    defer { sqlite3_close(db) }
-    let log = Dictionary(grouping: rows(db, Q), by: { $0[0] })
-    // bric_log.job is the target, or the brief in logs from before
-    jobs = rows(db, "select source, brief, target from bric_job").map { j in
-      let n = rows(db, "select count(*) from \(j[0])").first?[0] ?? "0"
-      return Job(id: j[0], target: j[2], rows: ((log[j[2]] ?? []) + (log[j[1]] ?? [])).map {
+    var seen = Set<[String]>()
+    let log = Dictionary(grouping: read(Q).filter {
+      seen.insert([$0[0], $0[1]]).inserted }, by: { $0[0] })
+    jobs = read("select source, target from bric_job").map { j in
+      let (s, t) = ("\"\(j[0])\"", "\"\(j[1])\""), n = read("""
+        select count(*) filter (where key in (select key from \(t))),
+          count(*) from \(s)
+        """).first ?? ["0", "0"]
+      return Job(id: j[0], target: j[1], rows: (log[j[1]] ?? []).map {
         Row(id: $0[1], key: $0[1], state: $0[2], age: Int($0[3]) ?? 0,
-            pages: Int($0[4]) ?? 0) }, total: Int(n) ?? 0)
+            calls: Int($0[4]) ?? 0) }, done: Int(n[0]) ?? 0,
+        total: Int(n[1]) ?? 0)
     }
   }
   // zsh -i so workers inherit the BRIC_* keys from ~/.zshrc
@@ -143,14 +136,13 @@ struct JobView: View {
   @State var open = true
   @State var text = ""
   var body: some View {
-    let done = job.rows.filter { $0.state == "done" }.count
     DisclosureGroup(isExpanded: $open) {
       ForEach(job.rows.prefix(12)) { r in
         HStack(spacing: 6) {
           Dot(state: r.state)
           Text(r.key).lineLimit(1).truncationMode(.middle)
           Spacer()
-          Text("\(r.pages)p").foregroundStyle(.secondary)
+          Text("\(r.calls)c").foregroundStyle(.secondary)
           Text(ago(r.age)).foregroundStyle(.secondary)
             .frame(width: 30, alignment: .trailing)
           if r.state == "failed" {
@@ -168,8 +160,8 @@ struct JobView: View {
           win(value: job.target) } label: {
           Text(job.id).font(.system(.body, design: .monospaced).bold())
         }.buttonStyle(.plain).help("open \(job.target)")
-        ProgressView(value: Double(done), total: Double(max(job.total, 1)))
-        Text("\(done)/\(job.total)").monospacedDigit()
+        ProgressView(value: Double(job.done), total: Double(max(job.total, 1)))
+        Text("\(job.done)/\(job.total)").monospacedDigit()
           .foregroundStyle(.secondary)
       }
     }
