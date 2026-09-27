@@ -157,23 +157,20 @@ struct JobView: View {
   }
 }
 
-// a result table, re-read every two seconds while open
+// a result table in a native Table, re-read every two seconds while open
+struct Rec: Identifiable { let id: Int, v: [String] }
 struct DataView: View {
   let m: Model, t: String
   @State var d: [[String]] = []
   var body: some View {
-    ScrollView([.horizontal, .vertical]) {
-      Grid(alignment: .topLeading, horizontalSpacing: 16, verticalSpacing: 6) {
-        ForEach(d.indices, id: \.self) { i in
-          GridRow { ForEach(d[i].indices, id: \.self) {
-            Text(d[i][$0]).lineLimit(3).frame(maxWidth: 360,
-              alignment: .leading).fontWeight(i == 0 ? .bold : .regular)
-          } }
-          if i == 0 { Divider() }
-        }
-      }.font(.system(size: 11, design: .monospaced)).textSelection(.enabled)
-        .padding()
-    }.navigationTitle("\(t) · \(max(d.count - 1, 0)) rows")
+    let h = d.first ?? [], r = d.dropFirst().enumerated().map {
+      Rec(id: $0, v: $1) }
+    Table(r) {
+      TableColumnForEach(h.indices, id: \.self) { i in
+        TableColumn(h[i]) { Text($0.v[i]).help($0.v[i]) }
+      }
+    }.font(.system(size: 11, design: .monospaced))
+      .navigationTitle("\(t) · \(r.count) rows")
       .frame(minWidth: 500, minHeight: 300)
       .task { while !Task.isCancelled {
         d = m.table(t); try? await Task.sleep(for: .seconds(2)) } }
