@@ -121,5 +121,18 @@ shows job progress, results and research sessions. It can add keys and retry
 failed work, using Homebrew SQLite and the `BRIC_*` settings in your shell.
 Quitting the app leaves workers running.
 
+## Local models
+
+[llama.cpp](https://github.com/ggml-org/llama.cpp)'s `llama-server` answers
+the Anthropic messages API, tool use included. It has no web search, so an
+agent that tries it is told the tool is unknown; jobs that read their
+sources through a skill, like `cargo.sql`, run unchanged:
+
+```sh
+llama-server -m model.gguf --port 8089 --jinja -c 65536 --alias local
+export BRIC_URL=http://127.0.0.1:8089/v1/messages BRIC_MODEL=local
+export BRIC_KEY=local BRIC_WORKERS=1 BRIC_TIMEOUT=600
+```
+
 See the [API reference](docs/api.md) for job settings, SQL functions, logs
 and configuration.
