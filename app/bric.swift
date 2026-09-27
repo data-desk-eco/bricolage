@@ -209,8 +209,12 @@ struct DataView: View {
 struct Log: View {
   let m: Model, t: String, key: String
   @State var l: [[String]] = []
+  @State var full = Set<String>()
   var body: some View {
     List(l, id: \.[0]) { e in
+      let cut = e[3] == "receipt" ? 8 : e[3] == "open" ? Int.max : 40,
+        long = e[4].split(separator: "\n", omittingEmptySubsequences: false)
+          .count > cut || e[4].count > cut * 120
       VStack(alignment: .leading, spacing: 4) {
         HStack {
           Text(e[3]).bold().foregroundStyle(e[3] == "error" ? .red
@@ -218,10 +222,14 @@ struct Log: View {
           Spacer()
           Text("attempt \(e[1]) · turn \(e[2]) · #\(e[0])")
             .foregroundStyle(.secondary)
+          if long { Image(systemName: full.contains(e[0])
+            ? "chevron.up" : "chevron.down").foregroundStyle(.secondary) }
         }.font(.system(size: 10, design: .monospaced))
+          .contentShape(Rectangle()).onTapGesture {
+            if full.remove(e[0]) == nil { full.insert(e[0]) } }
         Text(e[4]).font(.system(size: 11,
           design: ["reply", "open"].contains(e[3]) ? .default : .monospaced))
-          .lineLimit(e[3] == "receipt" ? 8 : e[3] == "open" ? nil : 40).textSelection(.enabled)
+          .lineLimit(full.contains(e[0]) || !long ? nil : cut).textSelection(.enabled)
       }.padding(.vertical, 2)
     }.navigationTitle(key)
       .task { while !Task.isCancelled {
