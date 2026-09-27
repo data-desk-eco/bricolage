@@ -70,8 +70,8 @@ final class Model: ObservableObject {
           where value ->> 'type' in ('thinking', 'text'))
         when 'call' then coalesce(detail ->> 'command', detail)
         else coalesce(text, detail) end
-      from bric_log where key = \(q(key)) and job =
-        (select brief from bric_job where target = \(q(t))) order by seq
+      from bric_log where key = \(q(key)) and job in (\(q(t)),
+        (select brief from bric_job where target = \(q(t)))) order by seq
       """)
   }
   func load() {
@@ -83,10 +83,10 @@ final class Model: ObservableObject {
     sqlite3_exec(db, "pragma query_only = 1", nil, nil, nil)
     defer { sqlite3_close(db) }
     let log = Dictionary(grouping: rows(db, Q), by: { $0[0] })
-    // bric_log.job holds the brief
+    // bric_log.job is the target, or the brief in logs from before
     jobs = rows(db, "select source, brief, target from bric_job").map { j in
       let n = rows(db, "select count(*) from \(j[0])").first?[0] ?? "0"
-      return Job(id: j[0], target: j[2], rows: (log[j[1]] ?? []).map {
+      return Job(id: j[0], target: j[2], rows: ((log[j[2]] ?? []) + (log[j[1]] ?? [])).map {
         Row(id: $0[1], key: $0[1], state: $0[2], age: Int($0[3]) ?? 0,
             pages: Int($0[4]) ?? 0) }, total: Int(n) ?? 0)
     }
