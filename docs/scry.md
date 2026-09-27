@@ -1,32 +1,37 @@
-# scry.io as a research source, 2026-09-19
+# Scry research test
 
-[Scry](https://scry.io) is read-only ClickHouse-flavoured sql over archived
-public corpora: a 540 million page crawl, Common Crawl, SEC, LinkedIn,
-OpenAlex, Reddit, Twitter. The test wrapped it as a skill, `scry "select ..."`:
-a four-line script posting to `/v1/scry/query` and printing csv with jq, its
-key in `SCRY_API_KEY`, which reaches the sandbox as any non-`BRIC_` variable
-does. Neither the skill nor the job is kept; both are in commit 1af6df0. Queries were free (`billing_mode: free_slack`), token
-matches over the crawl answer in under a second, and a refused statement
-names the right column, so `deepseek-flash` corrected itself: 20 errors in
-302 receipts, no attempt lost.
+Tested on 19 September 2026. The experimental skill and job are in commit
+`1af6df0`; neither is included in the current tree.
 
-**ch4id, six unattributed plumes, with and without the skill.** No
-difference that matters: the same site and operator on all six, 207 turns
-against 232, and not one evidence url came from a scry receipt. A plume is
-found by position, imagery and the archive; by the time the agent has a
-name, web search already ranks the operator's page.
+[Scry](https://scry.io) provides SQL queries over archived web pages and
+other public datasets. The test used a shell command, `scry "SQL"`, to post
+queries to `/v1/scry/query` and return CSV. It authenticated with
+`SCRY_API_KEY`.
 
-**A job of its own, six site names, scry alone and no web search.** All six
-closed, 18 to 38 turns. Four got a quote that the trigger found verbatim
-in a receipt (Ghazipur's 2022 event, Appin and Tahmoor's 24%, Korpeje's
-2019 leaks, Kayrros's 83 events at Hassi Messaoud); Kandym and Lenghu got
-an honest nothing, after Russian and Chinese spellings, with the
-co-occurrence count called an upper bound. Operators were right on all six.
+## Results
 
-So: it is a good source when the key is a name and the question is what
-the web says, how often and since when, since it counts and dates, which
-search cannot, and every row is a receipt a constraint can check. It is
-thin on Chinese and regulator pages, a page has a row per version (`limit
-1 by url`), and personal keys are licensed for non-commercial research:
-data desk use needs a commercial engagement, and published work credits
-scry with a link.
+Adding Scry to the methane attribution job made little difference across
+six plumes. Both runs identified the same sites and operators: 207 turns
+with Scry, 232 without. None of the final evidence URLs came from Scry.
+Location, imagery and web search were enough for these cases.
+
+A separate test used Scry alone to research six named sites. All six
+attempts completed in 18–38 turns, with correct operators. Four found
+quotations that passed the database's citation check: Ghazipur, Appin and
+Tahmoor, Korpeje, and Hassi Messaoud. Kandym and Lenghu returned no supporting
+quotation, including after searches with Russian and Chinese spellings.
+
+Queries were free during the test (`billing_mode: free_slack`), and token
+searches over the crawl took less than a second. The model corrected 20
+query errors across 302 logged tool results; no attempt failed because of them.
+
+## Findings
+
+Scry was more useful for researching known names and counting or dating
+mentions than for identifying sites from coordinates. Coverage was limited
+for Chinese sources and regulator pages. Pages had multiple archived
+versions, so queries needed deduplication, such as `limit 1 by url`.
+
+At the time of the test, personal keys were restricted to non-commercial
+research, commercial use required a separate agreement, and published work
+required attribution with a link to Scry.

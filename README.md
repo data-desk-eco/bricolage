@@ -1,120 +1,104 @@
 # Bricolage
 
-Bricolage is a SQLite extension for building datasets using LLM research
-agents. Inserting rows into a to-do table spawns parallel agents, each
-with web search and a shell: the [Obscura](https://github.com/h4ckf0r0day/obscura)
-browser, the database itself and whatever else is installed in the sandbox
-you name. Each agent writes to a typed result table with validation and
-all operations are logged in the database.
+Bricolage is a SQLite extension for researching and enriching datasets with
+LLM agents. Add rows to a source table, and agents research each one using
+web search and a shell. They write results to a table you define, with
+SQLite constraints and triggers checking their answers. Prompts, tool calls
+and results are logged in the database.
 
-Use Bricolage to enrich existing datasets (e.g. take a list of LNG terminal
-names, find their operators) or to perform repeated research tasks with a
-full audit chain.
-
-![The data window: a job's result table, and the session of the selected
-row beside it](docs/app.png)
+![Result table with the selected row's research session](docs/app.png)
 
 ## Build
 
-    make            # ext/bric.dylib or ext/bric.so
-    make test       # two fake workers against test/fake.py
-    make app        # ext/bric-app, a macOS menu bar view of a db
-    make app-install  # the same as /Applications/Bricolage.app
+Requires a C compiler, libcurl and SQLite headers.
 
-Needs a C compiler, libcurl and the SQLite headers. The shell that runs
-your script must be able to `.load`: on macOS that is Homebrew's
-(`brew install sqlite`; the Makefile finds it at /opt/homebrew/opt/sqlite),
-not Apple's. Agents need `sh`, and use `obscura` and `sqlite3` when they
-are on the path of the shell you give them.
+```sh
+make              # ext/bric.dylib on macOS, ext/bric.so on Linux
+make test         # local tests with a mock API
+```
+
+Use a SQLite CLI that supports `.load`. On macOS, install Homebrew SQLite
+(`brew install sqlite`); Apple's bundled version does not support it. The
+Makefile checks `/opt/homebrew/opt/sqlite`.
 
 ## Quick start
 
-`example/` holds the jobs. `company.sql` resolves operators to their
-parent companies. `lng.sql` is two jobs in a chain: one lists the export
-terminals of a coast, and a trigger on its result table seeds the second,
-which maps each terminal's owner, FEED, EPC and equipment suppliers, so
-one key runs the pipeline. `ch4id.sql` attributes methane plumes to the
-sites that emit them. Loading `company.sql` creates the `company` to-do
-table and the `company_parent` result table, and inserts the job into
-`bric_job`, so that inserting a key is what starts an agent:
+Set your API key and model. Bricolage uses the Anthropic messages API by
+default; set `BRIC_URL` for another compatible endpoint.
 
-    sqlite3 research.db < example/company.sql
-    sqlite3 research.db -cmd '.load ./ext/bric' \
-      "insert into company values ('Petroleum Development Oman')"
+```sh
+export BRIC_KEY='your-api-key'
+export BRIC_MODEL='your-model'
+# On macOS with Homebrew:
+export PATH="/opt/homebrew/opt/sqlite/bin:$PATH"
 
-There is no daemon and no queue. A key is pending while the result table
-has no row for it, and a commit that inserts keys on a connection with the
-extension loaded starts a worker for each pending key up to `BRIC_WORKERS`;
-each worker outlives the connection, and each that finishes starts the
-next. Keys inserted without the extension start nothing until something
-loads it: `sqlite3 research.db ".load ./ext/bric"` restarts whatever is left.
-Delete a key's rows from the result table to research it again; editing a
-brief reruns nothing.
+sqlite3 research.db < example/company.sql
+sqlite3 research.db -cmd '.load ./ext/bric' \
+  "insert into company values ('Petroleum Development Oman')"
+```
 
-## Tools
+The example creates a `company` source table, a `company_parent` result
+table and a job in `bric_job`. Inserting a company starts an agent. Agents
+need `sh` and `curl`; browser skills also need
+[Obscura](https://github.com/h4ckf0r0day/obscura) installed where the shell
+can find it.
 
-An agent has a shell and web search. It runs scripts in the shell and
-queries the database with `db "select ..."`, which also gives it a
-full-text search over every page any agent has read. Prompting has three
-homes. What the harness needs of every agent, how to submit and what a
-receipt is, is in the tool description and never repeated. Who the agent
-is and what one row of the job means is the brief, the system prompt, kept
-as short as the schema it sits beside. Anything done in the shell, how to
-read a page, query some archive or frame a picture, is a skill in the
-[Agent Skills](https://agentskills.io) layout, generic enough to share
-between jobs; `bric_job.skills` is a glob of the skill directories a job
-uses, `./skills/{archive,web}`, and the model gets an index and reads a
-skill, and runs its scripts, when it needs to. `skills/web` wraps the
-[Obscura](https://github.com/h4ckf0r0day/obscura) browser as `page URL`.
+Workers run in the background, up to `BRIC_WORKERS` at once (default 4).
+They continue after the SQLite connection closes. Loading the extension
+resumes pending work:
 
-An agent answers by inserting its rows into the result table, and ends the
-attempt by ending a turn, so a constraint or trigger your schema carries is
-the answer's receipt. There is no submit step and no separate API: SQLite
-is the contract. `cites(source, quote)` is the check a cited row needs, that
-the quote is on the page the agent read, in one line of a trigger.
+```sh
+sqlite3 research.db '.load ./ext/bric'
+sqlite3 -header -column research.db 'select * from company_parent'
+```
 
-Every script and page is a receipt in `bric_log`, numbered and kept with
-the script that produced it, so any result can be traced back to, and
-rerun from, what the agent read. Receipts are append-only by trigger:
-neither an agent nor a slip of yours can edit or delete one. Drop the two
-triggers to prune.
+A key is complete when it has a row in the result table. Delete its results
+and reload the extension to research it again. Editing a job's instructions
+does not rerun completed work. Failed attempts retry up to `BRIC_ATTEMPTS`
+(default 3).
+
+Other examples:
+
+- [lng.sql](example/lng.sql): finds LNG export terminals, then uses a trigger
+  to start a second job researching their owners and suppliers.
+- [ch4id.sql](example/ch4id.sql): identifies sites responsible for methane plumes.
+
+## Jobs and tools
+
+Each job specifies its source table, result table and research instructions
+(`brief`). Agents query the database and insert results with `db "SQL"`.
+Use table constraints and triggers to validate results; `cites(source, quote)`
+checks a quotation against stored tool output.
+
+Jobs can load [Agent Skills](https://agentskills.io) for additional
+instructions and scripts. Set `bric_job.skills` to a directory pattern such
+as `./skills/{archive,web}`. Skill scripts become shell commands; the web
+skill provides `page URL` to read a page through Obscura.
 
 ## Sandbox
 
-Each `sh` call is one process: `$BRIC_SHELL <script>`, default `sh`, run
-in the attempt's scratch directory. That directory is the agent's whole
-world: `bin/` holds `db` and every skill script, `skills/` is a copy of each
-skill, and `.db` is a unix socket bric serves while the script runs, so
-`db "select ..."` reaches the database through curl and nothing else has
-to be mounted. The database file, the API key and the worker's `BRIC_*`
-environment are never in the sandbox. `sandbox/` holds one executor a
-line long for each of the usual isolations; each takes the script path as
-its argument and needs nothing outside the scratch directory but the system's own
-tools, so the home directory is out of reach:
+Shell calls run in a temporary directory containing the job's skills and a
+`db` command that connects to the worker through a Unix socket. The shell
+runs without the worker's `BRIC_*` variables, including `BRIC_KEY`.
 
-    BRIC_SHELL=./sandbox/seatbelt      # macOS
-    BRIC_SHELL=./sandbox/bwrap         # linux
-    BRIC_SHELL=./sandbox/docker        # any; BRIC_IMAGE names the image, default tools
+The default shell is `sh`, with no filesystem isolation. To restrict access,
+set `BRIC_SHELL` to one of the supplied wrappers:
 
-A job can name its own executor in `bric_job.shell`, so a geospatial job
-runs in an image with GDAL while the rest use `sh`. Adding a tool is
-installing it where that executor can see it, and telling the model about
-it in the brief or a skill.
+```sh
+export BRIC_SHELL=./sandbox/seatbelt  # macOS
+export BRIC_SHELL=./sandbox/bwrap     # Linux, requires bubblewrap
+export BRIC_SHELL=./sandbox/docker    # Docker, requires an image named tools
+```
 
-## App
+A job can override this with `bric_job.shell`. Install any extra tools where
+that shell can access them.
 
-`make app-install` puts Bricolage in /Applications: a menu bar item, a
-lowercase b, that watches one database. Each job shows its progress, the
-keys its target has out of the keys in its to-do table, and its latest
-attempts, from `bric_attempt`. A key typed under a job is inserted into
-its to-do table, a failed one is retried, and play inserts again every key
-its target lacks, through Homebrew's `sqlite3` with the extension loaded
-and your shell's `BRIC_*` environment, so the app starts nothing the
-command line could not. It never writes the database itself and keeps no
-state but the path, and quitting it stops no worker.
+## macOS app
 
-A job's name opens its result table and a key opens its row, with the
-session beside it: the brief, each reply, each script and the receipt it
-produced, as `bric_log` has them.
+`make app-install` installs Bricolage in `/Applications`. The menu bar app
+shows job progress, results and research sessions. It can add keys and retry
+failed work, using Homebrew SQLite and the `BRIC_*` settings in your shell.
+Quitting the app leaves workers running.
 
-Functions, tables, views and configuration are in [docs/api.md](docs/api.md).
+See the [API reference](docs/api.md) for job settings, SQL functions, logs
+and configuration.
