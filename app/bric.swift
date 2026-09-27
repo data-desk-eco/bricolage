@@ -199,8 +199,9 @@ struct DataView: View {
         TableColumn(h[i]) { Text($0.v[i]).help($0.v[i]) }
       }
     }.font(.system(size: 11, design: .monospaced))
-      .onChange(of: sel) { if let s = sel, r.indices.contains(s) {
-        win(id: "log", value: Open(t: t, key: r[s].v[k])) } }
+      .contextMenu(forSelectionType: Int.self) { _ in } primaryAction: {
+        for s in $0 where r.indices.contains(s) {
+          win(id: "log", value: Open(t: t, key: r[s].v[k])) } }
       .navigationTitle("\(t) · \(r.count) rows")
       .frame(minWidth: 500, minHeight: 300)
       .task { while !Task.isCancelled {
