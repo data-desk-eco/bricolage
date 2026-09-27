@@ -8,20 +8,24 @@ and results are logged in the database.
 
 ![Result table with the selected row's research session](docs/app.png)
 
-## Build
+## Quick start
 
-Requires a C compiler, libcurl and SQLite headers.
+Clone the repository for the examples and skills, then download `bric.dylib`
+(macOS) or `bric.so` (Linux) from the
+[latest release](https://github.com/data-desk-eco/bricolage/releases/latest)
+into its `ext/` directory:
 
 ```sh
-make              # ext/bric.dylib on macOS, ext/bric.so on Linux
-make test         # local tests with a mock API
+git clone https://github.com/data-desk-eco/bricolage.git
+cd bricolage
+mkdir -p ext
+# macOS:
+curl -fL https://github.com/data-desk-eco/bricolage/releases/latest/download/bric.dylib -o ext/bric.dylib
+# Linux: use bric.so in place of bric.dylib in the command above.
 ```
 
 Use a SQLite CLI that supports `.load`. On macOS, install Homebrew SQLite
-(`brew install sqlite`); Apple's bundled version does not support it. The
-Makefile checks `/opt/homebrew/opt/sqlite`.
-
-## Quick start
+(`brew install sqlite`); Apple's bundled version does not support it.
 
 Set your API key and model. Bricolage uses the Anthropic messages API by
 default; set `BRIC_URL` for another compatible endpoint.
@@ -62,6 +66,17 @@ Other examples:
 - [lng.sql](example/lng.sql): finds LNG export terminals, then uses a trigger
   to start a second job researching their owners and suppliers.
 - [ch4id.sql](example/ch4id.sql): identifies sites responsible for methane plumes.
+
+## Build
+
+Requires a C compiler, libcurl and SQLite headers.
+
+```sh
+make              # ext/bric.dylib on macOS, ext/bric.so on Linux
+make test         # local tests with a mock API
+```
+
+The Makefile checks `/opt/homebrew/opt/sqlite` for Homebrew SQLite.
 
 ## Jobs and tools
 
