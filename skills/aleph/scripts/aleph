@@ -1,0 +1,32 @@
+#!/bin/sh
+# aleph search Q [k=v ...] | aleph read URL | aleph /path [k=v ...] — an
+# aleph server's api. read keeps the entity's text in bric_fetch under its
+# url, so a row cites that url; search and raw paths are leads, not kept.
+u=${ALEPH_URL%/}; u=${u%/api/2}
+get() {
+  p=$1; shift; for a; do set -- "$@" --data-urlencode "$a"; shift; done
+  curl -sfG -H "Authorization: ApiKey $ALEPH_API_KEY" "$u/api/2$p" "$@"
+}
+case $1 in
+search) q=$2; shift 2
+  get /entities q="$q" highlight=true limit=20 "$@" | jq -r --arg u "$u" '
+    "\(.total) hits", (.results[] | [$u + "/entities/" + .id, .schema,
+      .collection.label, (.properties | (.title // .fileName // .name
+      // .subject // [""])[0], ((.date // [""])[0])),
+      ((.highlight // []) | join(" … ") | gsub("\\s+"; " "))] | @tsv)' ;;
+read) i=${2##*/}; t=$(get "/entities/$i" | jq -r '
+    "\(.schema): \(.caption // .properties.fileName[0])",
+    "collection: \(.collection.label)",
+    (.properties | to_entries[] | select(.key != "bodyText")
+      | "\(.key): \(.value | map(if type == "object" then .caption
+        // .id else . end) | join("; "))"),
+    "", (.properties.bodyText // [] | join("\n"))') || exit 1
+  t=$t$(get /entities filter:properties.document="$i" filter:schemata=Page \
+    limit=500 | jq -r '.results | sort_by(.properties.index[0] | tonumber)
+    | .[] | "\n[page \(.properties.index[0])]\n\(.properties.bodyText[0])"')
+  e() { printf %s "$1" | sed "s/'/''/g"; }
+  printf "insert into bric_fetch (url, text) values ('%s', squeeze('%s'))" \
+    "$u/entities/$i" "$(e "$t")" | db >/dev/null 2>&1
+  printf '%s\n' "$t" ;;
+*) get "$@" | jq . ;;
+esac
