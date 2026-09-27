@@ -13,3 +13,9 @@ clean:
 	rm -rf ext test/out.db*
 
 .PHONY: test clean
+
+app: ext/bric-app
+ext/bric-app: app/bric.swift
+	@mkdir -p ext
+	swiftc -O -parse-as-library $< -o $@
+.PHONY: app
