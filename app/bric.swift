@@ -195,7 +195,7 @@ struct DataView: View {
         if let key { Log(m: m, t: t, key: key).id(key)
           .inspectorColumnWidth(min: 300, ideal: 460) }
       }
-      .onChange(of: sel) { if let s = sel { key = r[s].v[k] } }
+      .onChange(of: sel) { if let s = sel, r.indices.contains(s) { key = r[s].v[k] } }
       .onChange(of: d.count) { if sel == nil, let key {
         sel = r.firstIndex { $0.v[k] == key } } }
       .navigationTitle("\(t) · \(r.count) rows")
@@ -212,7 +212,7 @@ struct Log: View {
   @State var full = Set<String>()
   var body: some View {
     List(l, id: \.[0]) { e in
-      let cut = e[3] == "receipt" ? 8 : e[3] == "open" ? Int.max : 40,
+      let cut = e[3] == "receipt" ? 8 : e[3] == "open" ? 1 << 20 : 40,
         long = e[4].split(separator: "\n", omittingEmptySubsequences: false)
           .count > cut || e[4].count > cut * 120
       VStack(alignment: .leading, spacing: 4) {
