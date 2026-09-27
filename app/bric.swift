@@ -55,6 +55,25 @@ final class Model: ObservableObject {
     sqlite3_exec(db, "pragma query_only = 1", nil, nil, nil)
     return rows(db, "select * from \"\(t)\"", head: true)
   }
+  // one key's log in order, replies as their thinking and text, calls as
+  // their command
+  func log(_ t: String, _ key: String) -> [[String]] {
+    var db: OpaquePointer?
+    guard sqlite3_open_v2(path, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK
+      else { return [] }
+    defer { sqlite3_close(db) }
+    sqlite3_exec(db, "pragma query_only = 1", nil, nil, nil)
+    return rows(db, """
+      select seq, attempt, turn, kind, case kind
+        when 'reply' then (select group_concat(coalesce(value ->> 'thinking',
+          value ->> 'text'), char(10) || char(10)) from json_each(detail)
+          where value ->> 'type' in ('thinking', 'text'))
+        when 'call' then coalesce(detail ->> 'command', detail)
+        else coalesce(text, detail) end
+      from bric_log where key = \(q(key)) and job =
+        (select brief from bric_job where target = \(q(t))) order by seq
+      """)
+  }
   func load() {
     var db: OpaquePointer?
     // a read-only open fails on a WAL db without a writable shm, so open
@@ -162,18 +181,48 @@ struct Rec: Identifiable { let id: Int, v: [String] }
 struct DataView: View {
   let m: Model, t: String
   @State var d: [[String]] = []
+  @State var sel: Int?
   var body: some View {
     let h = d.first ?? [], r = d.dropFirst().enumerated().map {
       Rec(id: $0, v: $1) }
-    Table(r) {
+    let key = sel.flatMap { i in r.first { $0.id == i } }?.v.first
+    Table(r, selection: $sel) {
       TableColumnForEach(h.indices, id: \.self) { i in
         TableColumn(h[i]) { Text($0.v[i]).help($0.v[i]) }
       }
     }.font(.system(size: 11, design: .monospaced))
+      .inspector(isPresented: .constant(key != nil)) {
+        if let key { Log(m: m, t: t, key: key).id(key)
+          .inspectorColumnWidth(min: 300, ideal: 460) }
+      }
       .navigationTitle("\(t) · \(r.count) rows")
       .frame(minWidth: 500, minHeight: 300)
       .task { while !Task.isCancelled {
         d = m.table(t); try? await Task.sleep(for: .seconds(2)) } }
+  }
+}
+
+// a row's session: every log entry of its key, latest attempt last
+struct Log: View {
+  let m: Model, t: String, key: String
+  @State var l: [[String]] = []
+  var body: some View {
+    List(l, id: \.[0]) { e in
+      VStack(alignment: .leading, spacing: 4) {
+        HStack {
+          Text(e[3]).bold().foregroundStyle(e[3] == "error" ? .red
+            : e[3] == "call" ? .blue : .primary)
+          Spacer()
+          Text("attempt \(e[1]) · turn \(e[2]) · #\(e[0])")
+            .foregroundStyle(.secondary)
+        }.font(.system(size: 10, design: .monospaced))
+        Text(e[4]).font(.system(size: 11,
+          design: e[3] == "reply" ? .default : .monospaced))
+          .lineLimit(e[3] == "receipt" ? 8 : 40).textSelection(.enabled)
+      }.padding(.vertical, 2)
+    }.navigationTitle(key)
+      .task { while !Task.isCancelled {
+        l = m.log(t, key); try? await Task.sleep(for: .seconds(2)) } }
   }
 }
 
