@@ -16,6 +16,7 @@ full audit chain.
     make            # ext/bric.dylib or ext/bric.so
     make test       # two fake workers against test/fake.py
     make app        # ext/bric-app, a macOS menu bar view of a db
+    make app-install  # the same as /Applications/Bricolage.app
 
 Needs a C compiler, libcurl and the SQLite headers. The shell that runs
 your script must be able to `.load`: on macOS that is Homebrew's

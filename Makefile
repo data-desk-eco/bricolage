@@ -19,3 +19,16 @@ ext/bric-app: app/bric.swift
 	@mkdir -p ext
 	swiftc -O -parse-as-library $< -o $@
 .PHONY: app
+
+# a menu bar bundle (LSUIElement: no dock icon) copied to /Applications
+A = ext/Bricolage.app/Contents
+app-install: ext/bric-app
+	mkdir -p $(A)/MacOS && cp $< $(A)/MacOS/bric
+	plutil -create xml1 $(A)/Info.plist
+	for k in CFBundleExecutable=bric CFBundleIdentifier=eco.datadesk.bric \
+	  CFBundleName=Bricolage CFBundlePackageType=APPL; do \
+	  plutil -insert $${k%%=*} -string $${k#*=} $(A)/Info.plist; done
+	plutil -insert LSUIElement -bool true $(A)/Info.plist
+	codesign -fs - ext/Bricolage.app
+	rm -rf /Applications/Bricolage.app && cp -R ext/Bricolage.app /Applications
+.PHONY: app-install
