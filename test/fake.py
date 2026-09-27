@@ -57,7 +57,7 @@ class H(BaseHTTPRequestHandler):
         elif key == 'bolt' and turn == 0 and not paused:
             content = [{'type': 'server_tool_use', 'id': 's1', 'name': 'web_search', 'input': {'query': 'bolt'}}]
         elif turn == 0:
-            content = [sh('c1', "cat <<'EOF'\n%s\nEOF" % PAGE),
+            content = [sh('c1', 'page https://example.org/acme'),
                        sh('c2', "printf '%s'" % ''.join('\\%03o' % b for b in PNG)),
                        sh('c3', 'echo "K=$BRIC_KEY|D=$BRIC_DB|P=$PWD"; printf \'\\377\\303\'; db "select count(*) from bric_log where key = \'%s\' and kind = \'receipt\' and attempt = (select max(attempt) from bric_log where key = \'%s\')"; echo x > f; exit 3' % (key, key))]
         elif turn == 1:
@@ -112,6 +112,11 @@ def main():
     server = ThreadingHTTPServer(('127.0.0.1', 0), H)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     base = 'http://127.0.0.1:%d' % server.server_port
+    os.makedirs('test/out.bin', exist_ok=True)
+    with open('test/out.bin/page', 'w') as f:
+        f.write("#!/bin/sh\ncat <<'EOF'\n%s\nEOF\n" % PAGE)
+    os.chmod('test/out.bin/page', 0o755)
+    os.environ['PATH'] = os.path.abspath('test/out.bin') + ':' + os.environ['PATH']
     os.environ.update(SQLITE=SQLITE, BRIC_SQLITE=SQLITE, BRIC_URL=base + '/v1/messages', BRIC_MODEL='fake', BRIC_KEY='secret', BRIC_TIMEOUT='2')
     for f in ['test/out.db', 'test/out.db-wal', 'test/out.db-shm']:
         if os.path.exists(f):

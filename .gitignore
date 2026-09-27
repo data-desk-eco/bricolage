@@ -3,3 +3,4 @@
 *.db-shm
 /ext/
 **/__pycache__/
+/test/out.bin/
