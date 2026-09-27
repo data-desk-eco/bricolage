@@ -14,7 +14,7 @@ def sql(*statements, db=DB, load=False):
 
 
 def seed(keys):
-    return sql('.read %s/ch4id.sql' % ROOT,
+    return sql('.read %s/example/ch4id.sql' % ROOT,
                'insert or replace into plume (key) values %s;'
                % ', '.join("('%s')" % k for k in keys), db=DB,
                load=True)

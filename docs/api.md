@@ -39,7 +39,7 @@ dead-attempt check and the worker slots.
 True when `quote` is a phrase on the receipt numbered `source`: the cite
 check, a phrase query against `bric_page`, which ignores whitespace, case
 and punctuation. It is safe in a trigger, so a result table's receipt is one
-line, as in `company.sql`:
+line, as in `example/company.sql`:
 
     select raise(abort, 'quote not found in source') where not cites(new.source, new.quote);
 
@@ -132,7 +132,7 @@ FTS5 over `bric_receipt`, the log's rows that have text, filled by trigger as re
 `bric_receipt` is `(seq, text, url)`: `url` is the receipt's first line when
 that is a url, which is what `page URL` prints, so a cited row's page is one
 join, `select p.*, r.url from terminal_party p join bric_receipt r on r.seq = p.source`,
-and `lng.sql` refuses a source whose `url` is null.
+and `example/lng.sql` refuses a source whose `url` is null.
 `select rowid, snippet(bric_page, 0, '', '', ' ... ', 48) from bric_page
 where bric_page match 'x'` finds every page any attempt has read, and the
 rowid is a `seq` a result row may cite. The model runs this through

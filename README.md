@@ -26,16 +26,16 @@ are on the path of the shell you give them.
 
 ## Quick start
 
-`company.sql` resolves operators to their parent companies. `lng.sql` is
-two jobs in a chain: one lists the export terminals of a coast, and a
-trigger on its result table seeds the second, which maps each terminal's
-owner, FEED, EPC and equipment suppliers, so one key runs the pipeline.
-Loading `company.sql`
-creates the `company` to-do table and the `company_parent` result table,
-and inserts the job into `bric_job`, so that inserting a key is what
-starts an agent:
+`example/` holds the jobs. `company.sql` resolves operators to their
+parent companies. `lng.sql` is two jobs in a chain: one lists the export
+terminals of a coast, and a trigger on its result table seeds the second,
+which maps each terminal's owner, FEED, EPC and equipment suppliers, so
+one key runs the pipeline. `ch4id.sql` attributes methane plumes to the
+sites that emit them. Loading `company.sql` creates the `company` to-do
+table and the `company_parent` result table, and inserts the job into
+`bric_job`, so that inserting a key is what starts an agent:
 
-    sqlite3 research.db < company.sql
+    sqlite3 research.db < example/company.sql
     sqlite3 research.db -cmd '.load ./ext/bric' \
       "insert into company values ('Petroleum Development Oman')"
 
@@ -104,10 +104,11 @@ it in the brief or a skill.
 lowercase b, that watches one database. Each job shows its progress, the
 keys its target has out of the keys in its to-do table, and its latest
 attempts, from `bric_attempt`. A key typed under a job is inserted into
-its to-do table, and a failed one is retried, through Homebrew's `sqlite3`
-with the extension loaded and your shell's `BRIC_*` environment, so the app
-starts nothing the command line could not. It never writes the database
-itself and keeps no state but the path, and quitting it stops no worker.
+its to-do table, a failed one is retried, and play inserts again every key
+its target lacks, through Homebrew's `sqlite3` with the extension loaded
+and your shell's `BRIC_*` environment, so the app starts nothing the
+command line could not. It never writes the database itself and keeps no
+state but the path, and quitting it stops no worker.
 
 A job's name opens its result table and a key opens its row, with the
 session beside it: the brief, each reply, each script and the receipt it

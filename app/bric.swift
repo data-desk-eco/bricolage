@@ -104,6 +104,11 @@ final class Model: ObservableObject {
     if !ks.isEmpty { run("insert or replace into \(job) (key) values ("
       + ks.joined(separator: "), (") + ")") }
   }
+  // every key its target has no row for, inserted again as the readme does
+  func pending(_ j: Job) {
+    run("insert or replace into \"\(j.id)\" select * from \"\(j.id)\" "
+      + "where key not in (select key from \"\(j.target)\")")
+  }
   func retry(_ job: String, _ key: String) {
     run("insert or replace into \(job) select * from \(job) where key = "
       + q(key))
@@ -168,6 +173,10 @@ struct JobView: View {
         ProgressView(value: Double(job.done), total: Double(max(job.total, 1)))
         Text("\(job.done)/\(job.total)").monospacedDigit()
           .foregroundStyle(.secondary)
+        if job.done < job.total {
+          Button { m.pending(job) } label: { Image(systemName: "play.fill") }
+            .buttonStyle(.plain).help("run the keys \(job.target) lacks")
+        }
       }
     }
   }
