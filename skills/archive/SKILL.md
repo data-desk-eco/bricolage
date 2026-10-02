@@ -17,9 +17,9 @@ spatial loaded and these table macros defined, so every later call is cheap:
 - `attributions()`: about 2,000 published attributions in the shape you answer
   in: `id`, `source_label`, `source_kind`, `source_name`, `operator`,
   `attributed_ids`, `lat`, `lon`, `confidence`, `paragraph`, `evidence`,
-  `model`, `run_at`, `verified`, `operator_id`, `operator_name`. Read this before you answer: a record near
-  yours in place, date or operator is the best single piece of evidence you
-  will get.
+  `model`, `run_at`, `verified`, `operator_id`, `operator_name`. These are
+  earlier models' claims, mostly unreviewed: a lead to check against the
+  ground, never evidence of a facility or an operator by themselves.
 - `entities()`: GEM's company register: `entity_id` (`E` and digits),
   `name`, `full_name`, `name_local`, `name_other`, `lei`, `permid`,
   `gem_parents_ids`, `hq_country`.

@@ -30,8 +30,11 @@ create table if not exists plume_source (
   constraint "attributed_ids is a json array of archive ids, or null"
     check (attributed_ids is null
         or (json_valid(attributed_ids) and json_type(attributed_ids) = 'array')),
-  constraint "paragraph is at least fifteen words"
-    check (length(trim(paragraph)) - length(replace(trim(paragraph), ' ', '')) >= 14),
+  constraint "paragraph is 60 to 100 words"
+    check (length(trim(paragraph)) - length(replace(trim(paragraph), ' ', ''))
+           between 59 and 99),
+  constraint "paragraph names no function: write for a reader, not the tools"
+    check (paragraph not like '%()%'),
   constraint "evidence is a json array of urls, or null"
     check (evidence is null
         or (json_valid(evidence) and json_type(evidence) = 'array'))
@@ -74,7 +77,8 @@ create table if not exists claim_operator (
   operator_id   text,
   operator_name text,
   confidence    text not null check (confidence in ('high', 'medium', 'low')),
-  paragraph     text not null,
+  paragraph     text not null check (paragraph not like '%()%'
+                                    and length(paragraph) < 400),
   constraint "operator_id is lei:<20 chars>, gem:E<digits> or permid:<digits>"
     check (operator_id is null
         or operator_id glob 'lei:*' and length(operator_id) = 24
@@ -97,18 +101,34 @@ fail to.
 The key is the `id` of one row of `plumes()`, verbatim, and `src` there says
 who detected it: a Carbon Mapper id looks like `tan20250101t113529c00s4001-A`,
 an IMEO id is a bare uuid, an SRON id is `sron_20230304_32.20N_93.35W`, a
-Data Desk id starts `DD:`. Read `archive` first, then your row, then
-`attributions()` near it; `imagery` before your first picture; `carbon-mapper`
-when the key is a Carbon Mapper record; `web` before your first search.
+Data Desk id starts `DD:`. Read `archive` first, then your row; `imagery`
+before your first picture; `carbon-mapper` when the key is a Carbon Mapper
+record; `web` before your first search.
+
+Name the facility and its operator from the ground, the maps and what you
+read. Earlier attributions near the plume are other models'' claims, not
+evidence: use one only to find something to check, never as the answer.
 
 - `source_label` names the source in one to eight words.
 - `source_kind` is what the methane comes out of, not where you read about it.
 - `attributed_ids` holds every archive feature id for the site, the site''s
   own first, spelt as `features()` spells them.
-- `lat` and `lon` are the assessed source position.
-- high or medium `confidence` needs a url in `evidence`; a low answer that
-  says what it does not know beats no answer at all.
-- `paragraph` says what you saw, what you read, and how they agree.
+- `lat` and `lon` are where the source stands: the plume''s own coordinate
+  only when the source is there, which a coarse sensor rarely shows.
+- `confidence` is how sure you are that the methane comes from the site you
+  name, and nothing else: not the operator, not the facility''s exact name.
+  high: the sensor places the plume on that one site, closer than its own
+  error, ground or imagery shows equipment there that vents or leaks
+  methane, and no other candidate stands within the error.
+  medium: that site is the likeliest of a few, or the source is clear only
+  as a kind of place (a field''s pads, a pipeline corridor).
+  low: a coarse position over several candidates, or no equipment seen.
+  high or medium needs a url in `evidence`; a low answer that says what it
+  does not know beats no answer at all.
+- `paragraph` is for a reader who will never see your tools: 80 to 100
+  words on the source, the evidence that places the methane there and what
+  leaves doubt. Name no function, table, file, id or step of your own work,
+  and do not narrate your search.
 - `evidence` lists the urls you actually fetched.',
   './skills/{archive,imagery,carbon-mapper,web}'
 );
@@ -122,18 +142,23 @@ attribution wrote it, the source name and the archive feature ids. Read
 `archive` first.
 
 Work in this order and stop at the first that answers:
-1. precedent: `attributions()` rows near the plume or naming the same
-   operator that already carry an `operator_id`; confirm it still applies.
-2. the features: a `GEM:` feature id leads through `owners()` to the GEM
+1. the features: a `GEM:` feature id leads through `owners()` to the GEM
    entities that own it, and `entities()` gives their `lei` and `permid`.
-3. the names: `entities()` and `gleif()` by name, trading and local names
+2. the names: `entities()` and `gleif()` by name, trading and local names
    included.
+Another attribution''s `operator_id` is a claim, not a register: never copy
+one.
 - `operator_id` is the operating entity, not its ultimate parent: `lei:`
   where one exists, else `gem:`, else `permid:`. Copy it from an
   `entities()` or `gleif()` row you queried: an id found anywhere else, a
   GEM wiki page included, is not an answer.
 - `operator_name` is that row''s name, verbatim.
 - both are null when no register holds the entity; say so in `paragraph`.
-- `paragraph` names the rows you matched and why they are the same entity.',
+- `confidence` is how sure you are that the entity operates the source.
+  high: an ownership record for the site''s own feature names it. medium: the
+  names match and the place fits, with no ownership record. low: a name
+  match only, or several entities fit.
+- `paragraph` says in one or two sentences why the register entity is the
+  operator named, in plain words: no function, table or step of your own.',
   './skills/archive'
 );
