@@ -17,9 +17,18 @@ spatial loaded and these table macros defined, so every later call is cheap:
 - `attributions()`: about 2,000 published attributions in the shape you answer
   in: `id`, `source_label`, `source_kind`, `source_name`, `operator`,
   `attributed_ids`, `lat`, `lon`, `confidence`, `paragraph`, `evidence`,
-  `model`, `run_at`, `verified`. Read this before you answer: a record near
+  `model`, `run_at`, `verified`, `operator_id`, `operator_name`. Read this before you answer: a record near
   yours in place, date or operator is the best single piece of evidence you
   will get.
+- `entities()`: GEM's company register: `entity_id` (`E` and digits),
+  `name`, `full_name`, `name_local`, `name_other`, `lei`, `permid`,
+  `gem_parents_ids`, `hq_country`.
+- `owners()`: GEM's ownership edges: `subject_kind` (`asset` or `entity`),
+  `subject_id`, `owner_id`, `owner_name`, `share_pct`. A `GEM:L100…` feature is
+  subject `L100…`.
+- `gleif()`: every name GLEIF knows an entity by: `id` (`GLEIF:` and the LEI), `name`,
+  `kind` (legal, trading, translit, alternative, previous). Match with `ilike`
+  on a distinctive word, never a full scan without a filter.
 - `detections(tile)`: Sentinel-2 detections for one MGRS tile, as in
   `detections('30UVE')`.
 - `near(lat, lon, km)`: features within a box of that half-width, with `km`

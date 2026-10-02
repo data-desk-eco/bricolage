@@ -56,6 +56,37 @@ begin
     'high or medium confidence needs at least one evidence url, or drop to low');
 end;
 
+-- the sweep: a claim that names an operator is resolved to the register
+-- entity behind it, so the published row carries an id and not only a string
+create table if not exists claim (
+  key text primary key, operator text, source_name text, attributed_ids text
+);
+
+create trigger if not exists plume_source_claim after insert on plume_source
+  when new.operator is not null
+begin
+  insert or ignore into claim
+  values (new.key, new.operator, new.source_name, new.attributed_ids);
+end;
+
+create table if not exists claim_operator (
+  key           text primary key,
+  operator_id   text,
+  operator_name text,
+  confidence    text not null check (confidence in ('high', 'medium', 'low')),
+  paragraph     text not null,
+  constraint "operator_id is lei:<20 chars>, gem:E<digits> or permid:<digits>"
+    check (operator_id is null
+        or operator_id glob 'lei:*' and length(operator_id) = 24
+           and substr(operator_id, 5) not glob '*[^0-9A-Z]*'
+        or operator_id glob 'gem:E[0-9]*'
+           and substr(operator_id, 6) not glob '*[^0-9]*'
+        or operator_id glob 'permid:[0-9]*'
+           and substr(operator_id, 8) not glob '*[^0-9]*'),
+  constraint "an id has its register name and no id has none"
+    check ((operator_id is null) = (operator_name is null))
+);
+
 insert or replace into bric_job (source, target, brief, skills) values (
   'plume',
   'plume_source',
@@ -80,4 +111,29 @@ when the key is a Carbon Mapper record; `web` before your first search.
 - `paragraph` says what you saw, what you read, and how they agree.
 - `evidence` lists the urls you actually fetched.',
   './skills/{archive,imagery,carbon-mapper,web}'
+);
+
+insert or replace into bric_job (source, target, brief, skills) values (
+  'claim',
+  'claim_operator',
+  'You resolve the operator one methane attribution names to the entity a
+register knows it as. The key is the plume; the row gives the operator as the
+attribution wrote it, the source name and the archive feature ids. Read
+`archive` first.
+
+Work in this order and stop at the first that answers:
+1. precedent: `attributions()` rows near the plume or naming the same
+   operator that already carry an `operator_id`; confirm it still applies.
+2. the features: a `GEM:` feature id leads through `owners()` to the GEM
+   entities that own it, and `entities()` gives their `lei` and `permid`.
+3. the names: `entities()` and `gleif()` by name, trading and local names
+   included.
+- `operator_id` is the operating entity, not its ultimate parent: `lei:`
+  where one exists, else `gem:`, else `permid:`. Copy it from an
+  `entities()` or `gleif()` row you queried: an id found anywhere else, a
+  GEM wiki page included, is not an answer.
+- `operator_name` is that row''s name, verbatim.
+- both are null when no register holds the entity; say so in `paragraph`.
+- `paragraph` names the rows you matched and why they are the same entity.',
+  './skills/archive'
 );
