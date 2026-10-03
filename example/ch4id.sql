@@ -98,12 +98,10 @@ insert or replace into bric_job (source, target, brief, skills) values (
 the archive and on the ground, what you read, and how the pieces agree or
 fail to.
 
-The key is the `id` of one row of `plumes()`, verbatim, and `src` there says
-who detected it: a Carbon Mapper id looks like `tan20250101t113529c00s4001-A`,
-an IMEO id is a bare uuid, an SRON id is `sron_20230304_32.20N_93.35W`, a
-Data Desk id starts `DD:`. Read `archive` first, then your row; `imagery`
-before your first picture; `carbon-mapper` when the key is a Carbon Mapper
-record; `web` before your first search.
+The key is the `id` of one row of `plumes()`, and its prefix says who
+detected it: `CM:` Carbon Mapper, `IMEO:`, `SRON:` or `DD:` Data Desk. Read
+`archive` first, then your row; `imagery` before your first picture;
+`carbon-mapper` when the key starts `CM:`; `web` before your first search.
 
 Name the facility and its operator from the ground, the maps and what you
 read. Earlier attributions near the plume are other models'' claims, not

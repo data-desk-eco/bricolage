@@ -8,9 +8,10 @@ description: the data desk methane archive, queried with duckdb straight off pub
 The first call builds `archive.db` in the working directory with httpfs and
 spatial loaded and these table macros defined, so every later call is cheap:
 
-- `plumes()`: every plume the archive holds, about 70,000 rows: `id`, `src`
-  (cm, imeo, sron, dd), `lat`, `lon`, `dt`, `rate` in kg/hr, `unc`, `sat`,
-  `sec`, `link`, `overlay`, `bounds`.
+- `plumes()`: every valid plume the archive holds, about 75,000 rows: `id`
+  (prefixed by its provider: `CM:`, `IMEO:`, `SRON:`, `DD:`), `src`
+  (carbon-mapper, imeo, sron, data-desk), `lat`, `lon`, `dt`, `rate` in kg/hr,
+  `unc`, `sat`, `sec`, `link`, `overlay`, `bounds`.
 - `features()`: 15 million mapped features: `id`, `dataset` (ogim, osm, gem,
   mapstand), `kind` (snake case, 228 kinds), `name`, `operator`, `status`,
   `fuel`, `lat`, `lon`, `geometry`.
@@ -39,7 +40,7 @@ spatial loaded and these table macros defined, so every later call is cheap:
 
 Examples:
 
-    q "select * from plumes() where id = 'tan20250101t113529c00s4001-A'"
+    q "select * from plumes() where id = 'CM:tan20250101t113529c00s4001-A'"
     q "select id, kind, name, operator, round(km, 2) as km from near(38.49, 54.21, 5) order by km limit 20"
     q "select id, source_label, operator, confidence from attributions() where lat between 38.4 and 38.6 and lon between 54.1 and 54.3"
 
