@@ -348,8 +348,13 @@ static char *shell(Attempt *a, const char *script, char **images)
     int status = 0;
     waitpid(pid, &status, 0);
     int code = WIFEXITED(status) ? WEXITSTATUS(status) : WIFSIGNALED(status) ? 128 + WTERMSIG(status) : -1;
-    const char *mime = cut ? NULL : b.n > 4 && !memcmp(b.out, "\x89PNG", 4) ? "image/png"
-                     : b.n > 3 && !memcmp(b.out, "\xff\xd8\xff", 3) ? "image/jpeg" : NULL;
+    /* whole as well as alone: a png or jpeg cut short by `head -c` passed the
+       signature test, and the api rejected the request and ended the attempt */
+#define ENDS(t, k) !memcmp(b.out + b.n - (k), t, k)
+    const char *mime = cut || b.n < 16 ? NULL
+        : !memcmp(b.out, "\x89PNG", 4) && ENDS("IEND\xae\x42\x60\x82", 8) ? "image/png"
+        : !memcmp(b.out, "\xff\xd8\xff", 3) && ENDS("\xff\xd9", 2) ? "image/jpeg" : NULL;
+#undef ENDS
     char *text;
     if (mime) {
         char *data = base64((unsigned char *)b.out, b.n);

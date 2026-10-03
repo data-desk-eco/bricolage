@@ -123,7 +123,11 @@ static const char sql_result[] =
 
 static const char sql_row[] =
     "select printf('select nullif(json_group_array(json_object(%s)), ''[]'') from \"%w\" where \"key\" = ?1',"
-    " group_concat(printf('%Q, iif(typeof(\"%w\") = ''blob'', cast(\"%w\" as text), \"%w\")', name, name, name, name)), ?1)"
+    /* a text column holding a json object or array goes in as json, not as a
+       string of escaped json: a seed record is read, and its quotes cost tokens */
+    " group_concat(printf('%Q, case typeof(\"%w\") when ''blob'' then cast(\"%w\" as text)"
+    " when ''text'' then iif(json_valid(\"%w\") and json_type(\"%w\") in (''object'', ''array''), json(\"%w\"), \"%w\")"
+    " else \"%w\" end', name, name, name, name, name, name, name, name)), ?1)"
     " from pragma_table_info(?1)";
 
 static const char sql_schema[] =

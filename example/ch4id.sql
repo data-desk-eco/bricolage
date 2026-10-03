@@ -113,10 +113,12 @@ Method
 1. Set the search area from the sensor''s accuracy:
    - TROPOMI (most IMEO and SRON plumes): the source is usually 2 to
      10 km from the position, often upwind.
-   - Carbon Mapper aircraft: tens of metres. Tanager, EMIT, Sentinel-2
-     and IMEO high-resolution plumes: up to a few hundred metres.
-   Do not move a precise position upwind: the wind explains the plume''s
-   shape, not a different origin.
+   - GOES: several kilometres. VIIRS and Sentinel-3: about a kilometre.
+   - Carbon Mapper aircraft: tens of metres. Tanager, EMIT, Sentinel-2,
+     Landsat, EnMAP and PRISMA: up to a few hundred metres.
+   The record''s search radius follows these figures. Do not move a
+   precise position upwind: the wind explains the plume''s shape, not a
+   different origin.
 2. List the mapped infrastructure in that area. The record has the
    nearest features; query the archive if the area needs more.
 3. Check the strongest candidates in satellite imagery. Unmapped
