@@ -1,7 +1,9 @@
 #!/bin/sh
 # cm ID [plume|rgb] — a Carbon Mapper record's retrieval: the listing, or one of its pictures on stdout
 j=$(curl -sS "https://api.carbonmapper.org/api/v1/catalog/plumes/annotated?plume_names=${1#CM:}") || exit 1
-q() { printf '%s' "$j" | duckdb "$@" -c "select $1 from (select unnest(items) as i from read_json_auto('/dev/stdin'))"; }
+# the select list first, then duckdb's flags: passed whole, the list was read
+# as a database name and left a file of that name in the working directory
+q() { s=$1; shift; printf '%s' "$j" | duckdb "$@" -c "select $s from (select unnest(items) as i from read_json_auto('/dev/stdin'))"; }
 case $2 in
   plume|rgb) u=$(q "i.${2}_png" -noheader -csv); [ -n "$u" ] && exec curl -sS "$u"; echo "no $2 picture for $1" ;;
   *) q "i.plume_png, i.rgb_png, i.plume_bounds, i.sector, i.wind_speed_avg_auto as wind_ms, i.wind_direction_avg_auto as wind_from" -csv ;;

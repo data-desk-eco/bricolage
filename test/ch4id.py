@@ -37,8 +37,8 @@ def wait(keys, seconds=1800):
 
 
 PICKS = {
-    'imeo-emit': 'ae87ae10-a948-42c3-ba96-248157db65fe',
-    'cm-tanager-waste': 'tan20250101t113529c00s4001-A',
+    'imeo-emit': 'IMEO:ae87ae10-a948-42c3-ba96-248157db65fe',
+    'cm-tanager-waste': 'CM:tan20250101t113529c00s4001-A',
     'dd-aerial-satellite': 'DD:aoi:S2B_40SBJ_20241025_0_L1C:plume-1',
     'dd-barrow-pipeline': 'DD:pipeline-barrow:S2A_30UVE_20260314_1_L1C:plume-1',
 }
