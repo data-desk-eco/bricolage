@@ -1,25 +1,17 @@
 ---
 name: imagery
-description: a satellite picture of a place, to see whether the mapped thing is really there; `frame LAT LON KM` prints a jpeg
+description: Satellite imagery of a location, to check what is on the ground. `frame LAT LON KM` returns a picture.
 ---
-# looking at the ground
+# Satellite imagery
 
-The archive says where a thing is mapped. It does not say whether the pad was
-ever drilled, whether the tanks were built, whether the site was demolished,
-or which of two neighbours the plume sits on. A picture does.
+`frame LAT LON KM [PX]` returns a north-up satellite picture KM kilometres
+wide, 1,200 pixels by default:
 
-    frame 53.805 39.36 6        # 6 km across, north up, 1200 px
-    frame 53.805 39.36 1.5 1500 # closer, at 1500 px
+    frame 53.805 39.36 6
+    frame 53.805 39.36 1.5 1500
 
-The jpeg goes to stdout and is shown to you when it is the whole of the
-output, so run `frame` on its own, never after an `ls` or an `echo`. It is a
-few hundred kilobytes; keep the pixel size at or under 1500.
+Run `frame` on its own, so that the picture is the only output. Keep the
+size at 1,500 pixels or less.
 
-Two pictures answer most records: one wide frame at the whole search radius,
-so you see what stands around the plume, and one close frame at a kilometre
-or two on the candidate. Do not walk a grid of frames, do not re-shoot the
-same ground at slightly different sizes, and do not render ground you already
-decided was uninformative.
-
-Say what you saw in your paragraph. A picture you did not describe is a
-picture you did not read.
+Two pictures are usually enough: a wide view of the search area and a
+close view, 1 to 2 km wide, of the main candidate.

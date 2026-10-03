@@ -6,5 +6,5 @@ j=$(curl -sS "https://api.carbonmapper.org/api/v1/catalog/plumes/annotated?plume
 q() { s=$1; shift; printf '%s' "$j" | duckdb "$@" -c "select $s from (select unnest(items) as i from read_json_auto('/dev/stdin'))"; }
 case $2 in
   plume|rgb) u=$(q "i.${2}_png" -noheader -csv); [ -n "$u" ] && exec curl -sS "$u"; echo "no $2 picture for $1" ;;
-  *) q "i.plume_png, i.rgb_png, i.plume_bounds, i.sector, i.wind_speed_avg_auto as wind_ms, i.wind_direction_avg_auto as wind_from" -csv ;;
+  *) q "i.plume_png, i.rgb_png, i.plume_bounds, i.wind_speed_avg_auto as wind_ms, i.wind_direction_avg_auto as wind_from" -csv ;;
 esac

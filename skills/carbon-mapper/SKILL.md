@@ -1,17 +1,15 @@
 ---
 name: carbon-mapper
-description: a Carbon Mapper record's own retrieval, the plume mask over the scene and the scene alone; `cm ID` lists, `cm ID plume|rgb` shows
+description: Carbon Mapper's own data for a CM plume: the plume mask, the scene and the wind. `cm ID` lists it.
 ---
-# carbon mapper retrievals
+# Carbon Mapper plumes
 
-Carbon Mapper publishes its own retrieval for a record: the plume drawn over
-the scene, and the scene alone. The plume mask is the evidence; the scene is
-what it fell on.
+For a plume with a CM: ID, Carbon Mapper publishes the plume mask over the
+scene, the scene alone and its wind estimate:
 
-    cm CM:tan20250101t113529c00s4001-A         # the urls and the plume bounds
-    cm CM:tan20250101t113529c00s4001-A plume   # the mask, as a png on stdout
-    cm CM:tan20250101t113529c00s4001-A rgb     # the scene
+    cm CM:tan20250101t113529c00s4001-A         # links, plume bounds, wind
+    cm CM:tan20250101t113529c00s4001-A plume   # the plume mask, as a picture
+    cm CM:tan20250101t113529c00s4001-A rgb     # the scene, as a picture
 
-The signed urls expire within the hour, so ask when you need them rather
-than storing them. Not every record has a retrieval; ask and see. The
-sector and wind in the listing are the provider's own.
+The plume mask shows where the methane is. Not every plume has this data.
+The links expire within an hour, so request them when you need them.

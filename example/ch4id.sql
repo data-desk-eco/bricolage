@@ -1,6 +1,8 @@
 .load ./ext/bric
 
-create table if not exists plume (key text primary key);
+-- the to-do table: a plume's key and the seed's record of it, which the
+-- engine hands the agent as its first message
+create table if not exists plume (key text primary key, data text);
 
 create table if not exists plume_source (
   key            text primary key,
@@ -94,69 +96,110 @@ create table if not exists claim_operator (
 insert or replace into bric_job (source, target, brief, skills) values (
   'plume',
   'plume_source',
-  'You attribute one methane plume to the most likely source: what you see in
-the archive and on the ground, what you read, and how the pieces agree or
-fail to.
+  'You are an expert methane emissions analyst. Identify the most likely
+source of one methane plume. Your findings will be published and may be
+used to hold the operator to account, so be careful, specific and honest
+about uncertainty.
 
-The key is the `id` of one row of `plumes()`, and its prefix says who
-detected it: `CM:` Carbon Mapper, `IMEO:`, `SRON:` or `DD:` Data Desk. Read
-`archive` first, then your row; `imagery` before your first picture;
-`carbon-mapper` when the key starts `CM:`; `web` before your first search.
+The message is the plume''s record. Its ID has a prefix that names the
+provider: CM (Carbon Mapper), IMEO, SRON or DD (Data Desk). The record
+gives the sensor, date, position, emission rate, a search radius for the
+sensor, the day''s wind, the nearest mapped features with distance and
+bearing, earlier detections nearby, and links to satellite pictures.
+Start from the record. Use the archive skill to look further.
 
-Name the facility and its operator from the ground, the maps and what you
-read. Earlier attributions near the plume are other models'' claims, not
-evidence: use one only to find something to check, never as the answer.
+Method
 
-- `source_label` names the source in one to eight words.
-- `source_kind` is what the methane comes out of, not where you read about it.
-- `attributed_ids` holds every archive feature id for the site, the site''s
-  own first, spelt as `features()` spells them.
-- `lat` and `lon` are where the source stands: the plume''s own coordinate
-  only when the source is there, which a coarse sensor rarely shows.
-- `confidence` is how sure you are that the methane comes from the site you
-  name, and nothing else: not the operator, not the facility''s exact name.
-  high: the sensor places the plume on that one site, closer than its own
-  error, ground or imagery shows equipment there that vents or leaks
-  methane, and no other candidate stands within the error.
-  medium: that site is the likeliest of a few, or the source is clear only
-  as a kind of place (a field''s pads, a pipeline corridor).
-  low: a coarse position over several candidates, or no equipment seen.
-  high or medium needs a url in `evidence`; a low answer that says what it
-  does not know beats no answer at all.
-- `paragraph` is for a reader who will never see your tools: 80 to 100
-  words on the source, the evidence that places the methane there and what
-  leaves doubt. Name no function, table, file, id or step of your own work,
-  and do not narrate your search.
-- `evidence` lists the urls you actually fetched.',
+1. Set the search area from the sensor''s accuracy:
+   - TROPOMI (most IMEO and SRON plumes): the source is usually 2 to
+     10 km from the position, often upwind.
+   - Carbon Mapper aircraft: tens of metres. Tanager, EMIT, Sentinel-2
+     and IMEO high-resolution plumes: up to a few hundred metres.
+   Do not move a precise position upwind: the wind explains the plume''s
+   shape, not a different origin.
+2. List the mapped infrastructure in that area. The record has the
+   nearest features; query the archive if the area needs more.
+3. Check the strongest candidates in satellite imagery. Unmapped
+   equipment at a precise position beats a mapped facility kilometres
+   away.
+4. Check the plume''s history: repeated detections at one position mean a
+   persistent source.
+5. Identify the operator from regulator records, permits, operator
+   websites, dated reports and anything else useful you find online.
+   Search in the country''s own languages as well as English: most records
+   for Russia, Central Asia, the Middle East, North Africa, Latin America
+   and China are published only in Russian, Arabic, Spanish, Portuguese
+   or Chinese. Read a page before you rely on it.
+
+Earlier attributions in the archive are other models'' unreviewed
+claims. Use them only as leads to check.
+
+Output
+
+- source_label: the source, in one to eight words.
+- source_kind: the type of equipment that emits the methane.
+- source_name, operator: the facility and its operator, as sources name
+  them.
+- attributed_ids: the archive IDs of every mapped feature at the site,
+  the main one first.
+- lat, lon: the position of the source. Use the plume''s position only if
+  the source is there.
+- confidence: certainty that the methane comes from this site, ignoring
+  the operator and the facility''s name.
+  - high: the plume is on the site within the sensor''s accuracy, the
+    equipment is seen, and no other candidate is that close.
+  - medium: the most likely of a few candidates, or clear only as an
+    area such as a field''s pads or a pipeline corridor.
+  - low: a coarse position over several candidates, or no equipment
+    seen.
+  High or medium needs a URL in evidence.
+- paragraph: 80 to 100 words for a reader who has not seen your work:
+  the source, the evidence that places the emission there (including
+  what the imagery shows) and what remains uncertain. Plain English,
+  short sentences. No tools, tables, IDs or account of your steps.
+- evidence: the URLs you read.
+
+An honest low-confidence answer is better than a confident guess.',
   './skills/{archive,imagery,carbon-mapper,web}'
 );
 
 insert or replace into bric_job (source, target, brief, skills) values (
   'claim',
   'claim_operator',
-  'You resolve the operator one methane attribution names to the entity a
-register knows it as. The key is the plume; the row gives the operator as the
-attribution wrote it, the source name and the archive feature ids. Read
-`archive` first.
+  'You are an expert methane emissions analyst. A colleague has attributed
+a plume to a source and named its operator. Match that operator to the
+legal entity a company register holds for it. The message gives the
+operator, the source name and the site''s feature IDs. Read the archive
+skill first.
 
-Work in this order and stop at the first that answers:
-1. the features: a `GEM:` feature id leads through `owners()` to the GEM
-   entities that own it, and `entities()` gives their `lei` and `permid`.
-2. the names: `entities()` and `gleif()` by name, trading and local names
-   included.
-Another attribution''s `operator_id` is a claim, not a register: never copy
-one.
-- `operator_id` is the operating entity, not its ultimate parent: `lei:`
-  where one exists, else `gem:`, else `permid:`. Copy it from an
-  `entities()` or `gleif()` row you queried: an id found anywhere else, a
-  GEM wiki page included, is not an answer.
-- `operator_name` is that row''s name, verbatim.
-- both are null when no register holds the entity; say so in `paragraph`.
-- `confidence` is how sure you are that the entity operates the source.
-  high: an ownership record for the site''s own feature names it. medium: the
-  names match and the place fits, with no ownership record. low: a name
-  match only, or several entities fit.
-- `paragraph` says in one or two sentences why the register entity is the
-  operator named, in plain words: no function, table or step of your own.',
+Method
+
+1. If the features include a GEM asset, find its owners in GEM''s
+   ownership records. GEM''s company register gives each owner''s LEI and
+   PermID.
+2. Otherwise, search GEM''s company register and GLEIF by name. Try the
+   name in its original language and script as well as in English, and
+   trading and former names.
+3. Choose the entity that operates the site, not its ultimate parent.
+   If the operator is a subsidiary that no register holds, leave the ID
+   empty. Do not substitute the parent.
+
+Take every ID from a register record you have read, never from an
+earlier attribution.
+
+Output
+
+- operator_id: the entity''s LEI as lei:<LEI> if it has one, otherwise
+  its GEM ID as gem:<ID>, otherwise its PermID as permid:<ID>. Leave it
+  empty if no register holds the entity.
+- operator_name: the entity''s name exactly as the register spells it.
+  Leave it empty when operator_id is empty.
+- confidence: how certain you are that this entity operates the source.
+  - high: an ownership record for the site''s own feature names it.
+  - medium: the names match and the location fits, without an
+    ownership record.
+  - low: only the name matches, or several entities fit.
+- paragraph: one or two plain sentences on why this entity is the
+  operator, or why no register holds it. Do not mention tools or tables.',
   './skills/archive'
 );

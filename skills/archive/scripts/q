@@ -4,7 +4,7 @@ db=${ARCHIVE_DB:-archive.db}
 [ -f "$db" ] || duckdb "$db" "
 install httpfs; install spatial;
 create macro bucket(p) as 'https://s3.WAW3-2.cloudferro.com/data-desk-archive/' || p;
-create macro plumes() as table select id, provider as src, lat, lon, date as dt, rate_kg_h as rate, rate_std_kg_h as unc, satellite as sat, sector as sec, link, overlay, bounds from read_parquet(list_transform(['carbon-mapper', 'imeo', 'sron', 'data-desk'], lambda p: bucket(p || '/detections/data.parquet')), union_by_name = true) where kind = 'plume' and valid;
+create macro plumes() as table select id, provider as src, lat, lon, date as dt, rate_kg_h as rate, rate_std_kg_h as unc, satellite as sat, link, overlay, bounds from read_parquet(list_transform(['carbon-mapper', 'imeo', 'sron', 'data-desk'], lambda p: bucket(p || '/detections/data.parquet')), union_by_name = true) where kind = 'plume' and valid;
 create macro features() as table select * from read_parquet(bucket('views/features/data.parquet'));
 create macro attributions() as table select * from read_parquet(bucket('data-desk/attributions/data.parquet'));
 create macro entities() as table select * from read_parquet(bucket('gem/source/entities.parquet'));
