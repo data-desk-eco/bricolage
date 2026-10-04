@@ -59,8 +59,8 @@ create trigger if not exists plume_source_archive before insert on plume_source
   when exists (select 1 from json_each(new.evidence)
                 where value like '%cloudferro.com/%')
 begin
-  select raise(abort, 'evidence is never an archive url: cite the page '
-    || 'or record the archive row came from');
+  select raise(abort,
+    'evidence is never an archive url: cite the source behind the row');
 end;
 
 create trigger if not exists plume_source_confidence before insert on plume_source
@@ -86,8 +86,8 @@ create trigger if not exists plume_source_evidence before insert on plume_source
         where b.value ->> 'type' = 'web_search_tool_result'
           and instr(b.value, e.value)))))
 begin
-  select raise(abort, 'evidence holds only urls met in this session: '
-    || 'pages you fetched, or a search or the archive returned; not imagery');
+  select raise(abort,
+    'evidence holds only urls this session met, and never imagery');
 end;
 
 -- the sweep: a claim that names an operator is resolved to the register
