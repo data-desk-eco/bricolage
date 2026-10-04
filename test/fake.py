@@ -44,9 +44,11 @@ class H(BaseHTTPRequestHandler):
         quote = 'wholly   owned\nsubsidiary of Globex Corporation'
         if req['system'].startswith('bare shell'):
             if turn == 0:
-                content = [sh('b1', 'echo "X=$X"')]
+                content = [sh('b1', 'echo "X=$X|S=$SECRET_TEST|P=$PASS_ME"')]
             elif turn == 1:
-                assert last == 'X=1', last
+                # the shell gets what it was given and what BRIC_PASS names, no
+                # other variable of the worker's
+                assert last == 'X=1|S=|P=ok', last
                 content = [sh('b2', 'db "insert into bare values (\'%s\', cast(\'Globex\' as blob))"' % key)]
             elif turn == 2:
                 content = [sh('b3', 'db "begin; insert into bare values (\'x\', \'y\'); insert into bare values (\'x\', \'z\'); commit;"')]
@@ -119,6 +121,7 @@ def main():
         f.write("#!/bin/sh\ncat <<'EOF'\n%s\nEOF\ndb \"insert into bric_fetch (url, text) values ('%s', squeeze('%s'))\" >/dev/null\n" % (PAGE, URL, PAGE.split('\n', 1)[1]))
     os.chmod('test/out.bin/page', 0o755)
     os.environ['PATH'] = os.path.abspath('test/out.bin') + ':' + os.environ['PATH']
+    os.environ.update(SECRET_TEST='leak', PASS_ME='ok', BRIC_PASS=' PASS_ME  OTHER ')
     os.environ.update(SQLITE=SQLITE, BRIC_SQLITE=SQLITE, BRIC_URL=base + '/v1/messages', BRIC_MODEL='fake', BRIC_KEY='secret', BRIC_TIMEOUT='2')
     for f in ['test/out.db', 'test/out.db-wal', 'test/out.db-shm']:
         if os.path.exists(f):

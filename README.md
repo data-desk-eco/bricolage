@@ -70,7 +70,7 @@ Other examples:
   leak on an [Aleph](https://docs.aleph.occrp.org) server, then works out
   each one's vessel, parties, ports and dates, keyed by a plain id, citing
   Aleph entities through the `aleph` skill (set `ALEPH_URL` and
-  `ALEPH_API_KEY`).
+  `ALEPH_API_KEY`, and `BRIC_PASS='ALEPH_URL ALEPH_API_KEY'`).
 
 ## Build
 
@@ -100,7 +100,10 @@ skill provides `page URL` to read a page through Obscura, keeping it in
 
 Shell calls run in a temporary directory containing the job's skills and a
 `db` command that connects to the worker through a Unix socket. The shell
-runs without the worker's `BRIC_*` variables, including `BRIC_KEY`.
+gets only `HOME`, `USER`, `LOGNAME`, `LANG`, `LC_*`, `TZ`, `TERM`, `TMPDIR`,
+`SHELL` and its own `PATH` and `BRIC_DB` from the worker's environment, so no
+key or token reaches a page the agent was pointed at. To pass more, name the
+variables in `BRIC_PASS`, separated by spaces.
 
 The default shell is `sh`, with no filesystem isolation. To restrict access,
 set `BRIC_SHELL` to one of the supplied wrappers:

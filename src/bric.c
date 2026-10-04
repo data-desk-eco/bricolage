@@ -480,13 +480,31 @@ static void schema(void)
     sqlite3_exec(L, "alter table bric_job add column skills text", NULL, NULL, NULL);
 }
 
+/* the shell reads pages an agent was pointed at, so it gets no variable it
+   was not given: the worker's environment holds keys and tokens. a few that
+   name the user and locale pass, and any a job names in BRIC_PASS */
+static int passes(const char *kv)
+{
+    static const char *keep[] = { "HOME", "USER", "LOGNAME", "LANG", "TZ", "TERM", "TMPDIR", "SHELL", NULL };
+    size_t len = strcspn(kv, "=");
+    if (!strncmp(kv, "LC_", 3)) return 1;
+    for (const char **k = keep; *k; k++)
+        if (strlen(*k) == len && !strncmp(kv, *k, len)) return 1;
+    for (const char *p = env("BRIC_PASS", ""); *p; p += strcspn(p, " ")) {
+        p += strspn(p, " ");
+        size_t w = strcspn(p, " ");
+        if (w && w == len && !strncmp(kv, p, len)) return 1;
+    }
+    return 0;
+}
+
 static char **childenv(const char *dir)
 {
     int n = 0, m = 0;
     while (environ[n]) n++;
     char **e = sqlite3_malloc((n + 3) * sizeof *e);
     for (int i = 0; i < n; i++)
-        if (strncmp(environ[i], "BRIC_", 5) && strncmp(environ[i], "PATH=", 5)) e[m++] = environ[i];
+        if (passes(environ[i])) e[m++] = environ[i];
     e[m++] = sqlite3_mprintf("PATH=%s/bin:%s", dir, env("PATH", "/usr/bin:/bin"));
     e[m++] = sqlite3_mprintf("BRIC_DB=%s/.db", dir);
     e[m] = NULL;
