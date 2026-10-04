@@ -1,11 +1,12 @@
 #!/bin/sh
 # q "select ..." — one csv query against the archive; builds archive.db on first use
 db=${ARCHIVE_DB:-archive.db}
-[ -f "$db" ] || duckdb "$db" "
+# a database older than this script holds old macros: build it again
+[ "$db" -nt "$0" ] || { rm -f "$db"; duckdb "$db" "
 install httpfs; install spatial;
 create macro bucket(p) as 'https://s3.WAW3-2.cloudferro.com/data-desk-archive/' || p;
 create macro plumes() as table select id, provider as src, lat, lon, date as dt, rate_kg_h as rate, rate_std_kg_h as unc, satellite as sat, link, overlay, bounds from read_parquet(list_transform(['carbon-mapper', 'imeo', 'sron', 'data-desk'], lambda p: bucket(p || '/detections/data.parquet')), union_by_name = true) where kind = 'plume' and valid;
-create macro features() as table select * from read_parquet(bucket('views/features/data.parquet'));
+create macro features() as table select id, provider as dataset, kind, name, operator, status, fuel, lat, lon, geometry from read_parquet(list_transform(['ogim', 'osm', 'gem', 'mapstand', 'netl'], lambda p: bucket(p || '/infrastructure/data.parquet')), union_by_name = true);
 create macro attributions() as table select * from read_parquet(bucket('data-desk/attributions/data.parquet'));
 create macro entities() as table select * from read_parquet(bucket('gem/source/entities.parquet'));
 create macro owners() as table select * from read_parquet(bucket('gem/source/ownership.parquet'));
@@ -16,5 +17,5 @@ create macro near(lat0, lon0, km) as table
   from features()
   where lat between lat0 - km / 111.2 and lat0 + km / 111.2
     and lon between lon0 - km / (111.2 * cos(radians(lat0))) and lon0 + km / (111.2 * cos(radians(lat0)));
-" || exit 1
+" || { rm -f "$db"; exit 1; }; }
 exec duckdb -csv -cmd 'load httpfs; load spatial;' "$db" "$1"

@@ -47,10 +47,20 @@ create trigger if not exists plume_source_ids before insert on plume_source
    and exists (select 1
                  from json_each(new.attributed_ids)
                 where substr(value, 1, instr(value, ':') - 1)
-                      not in ('OGIM', 'OSM', 'GEM', 'MPS', 'OVT', 'DD'))
+                      not in ('OGIM', 'OSM', 'GEM', 'MPS', 'GOGI', 'OVT', 'DD'))
 begin
   select raise(abort,
-    'every attributed id is an archive feature id, prefixed OGIM:, OSM:, GEM:, MPS:, OVT: or DD:');
+    'every attributed id is an archive feature id, prefixed OGIM:, OSM:, GEM:, MPS:, GOGI:, OVT: or DD:');
+end;
+
+-- the archive is where a lead is found, not what it rests on: its tables
+-- hold other publishers' records, and the evidence is those publishers' pages
+create trigger if not exists plume_source_archive before insert on plume_source
+  when exists (select 1 from json_each(new.evidence)
+                where value like '%cloudferro.com/%')
+begin
+  select raise(abort, 'evidence is never an archive url: cite the page '
+    || 'or record the archive row came from');
 end;
 
 create trigger if not exists plume_source_confidence before insert on plume_source
@@ -142,8 +152,10 @@ Output
 - source_kind: the type of equipment that emits the methane.
 - source_name, operator: the facility and its operator, as sources name
   them.
-- attributed_ids: the archive IDs of every mapped feature at the site,
-  the main one first.
+- attributed_ids: the archive IDs of the mapped features at the site,
+  the facility or equipment that emits first. Search the archive near
+  the source for its ID. A licence area, field or basin outline is not
+  a source: leave it out.
 - lat, lon: the position of the source. Use the plume''s position only if
   the source is there.
 - confidence: certainty that the methane comes from this site, ignoring
@@ -159,7 +171,8 @@ Output
   the source, the evidence that places the emission there (including
   what the imagery shows) and what remains uncertain. Plain English,
   short sentences. No tools, tables, IDs or account of your steps.
-- evidence: the URLs you read.
+- evidence: the URLs you read. An archive file is not evidence: cite
+  the provider''s page or the record the row came from.
 
 An honest low-confidence answer is better than a confident guess.',
   './skills/{archive,imagery,carbon-mapper,web}'

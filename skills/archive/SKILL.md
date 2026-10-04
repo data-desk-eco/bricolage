@@ -10,7 +10,7 @@ These tables are available:
 | Table | Contents | Columns |
 |---|---|---|
 | `plumes()` | About 75,000 methane plumes | `id` (CM:, IMEO:, SRON: or DD: prefix), `src` (provider), `lat`, `lon`, `dt` (date), `rate` and `unc` (kg/h), `sat` (sensor), `link`, `overlay`, `bounds` |
-| `features()` | 15 million mapped oil, gas, coal and waste features from OGIM, OpenStreetMap, GEM and MapStand | `id`, `dataset`, `kind`, `name`, `operator`, `status`, `fuel`, `lat`, `lon`, `geometry` |
+| `features()` | 17 million mapped oil, gas, coal and waste features from OGIM, OpenStreetMap, GEM, MapStand and NETL's 2018 global database | `id` (OGIM:, OSM:, GEM:, MPS: or GOGI: prefix), `dataset`, `kind`, `name`, `operator`, `status`, `fuel`, `lat`, `lon`, `geometry` |
 | `near(lat, lon, km)` | The features within `km` of a point, with distance as `km` | As `features()`, plus `km` |
 | `attributions()` | Published attributions by earlier models | `id`, `source_label`, `source_kind`, `source_name`, `operator`, `operator_id`, `operator_name`, `attributed_ids`, `lat`, `lon`, `confidence`, `paragraph`, `evidence`, `verified` |
 | `entities()` | GEM's company register | `entity_id`, `name`, `full_name`, `name_local`, `name_other`, `lei`, `permid`, `gem_parents_ids`, `hq_country` |
