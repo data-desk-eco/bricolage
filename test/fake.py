@@ -37,7 +37,7 @@ class H(BaseHTTPRequestHandler):
         turn -= key == 'bolt' and turn > 0
         if paused:
             assert req['messages'][-1]['content'][0]['type'] == 'server_tool_use', req['messages'][-1]
-        blocks = [c['content'] for m in req['messages'] if m['role'] == 'user' and isinstance(m['content'], list) for c in m['content']]
+        blocks = [c.get('content', c.get('text')) for m in req['messages'] if m['role'] == 'user' and isinstance(m['content'], list) for c in m['content']]
         results = [b[0]['text'] if isinstance(b, list) else b for b in blocks]
         last = results[-1] if results else ''
         md = any(QUOTE in r for r in results)
@@ -138,6 +138,9 @@ def main():
     assert r.stdout == '0\n', r.stdout
     r = sqlite("select distinct detail from bric_log where key = 'plain' and kind = 'error';")
     assert r.stdout == 'reply without submission: no idea\n', r.stdout
+    # a reply with neither a call nor a row is reminded once before it fails
+    r = sqlite("select count(*) from bric_log where key = 'plain' and attempt = 1 and kind = 'reply';")
+    assert r.stdout == '2\n', r.stdout
     r = sqlite("select count(*) = (select count(*) from bric_fetch), count(*) > 2 from bric_page where bric_page match 'globex';")
     assert r.stdout == '1|1\n', r.stdout
     r = sqlite("select kind, input, output, calls, images, age < 60 from bric_attempt where key = 'acme';")
@@ -200,7 +203,7 @@ def main():
     assert r.stdout == 'cheap|{"thinking":{"type":"disabled"}}\n', r.stdout
     r = sqlite("select messages ->> '$[0].content' from bric_transcript where key = 'dyn';")
     assert r.stdout == '{"key":"dyn","parent":null,"source":null}\n', r.stdout
-    r = sqlite("select detail ->> 'system' like '%skills are what has already been worked out%- echo: says hello (%/echo/SKILL.md)' from bric_log where key = 'dyn' and kind = 'open';")
+    r = sqlite("select detail ->> 'system' like '%skills are what has already been worked out%- echo: says hello (`cat %/echo/SKILL.md`)' from bric_log where key = 'dyn' and kind = 'open';")
     assert r.stdout == '1\n', r.stdout
 
     def wait(sql, want):

@@ -4,4 +4,15 @@ lat=$1 lon=$2 km=$3 px=${4:-1200}
 bbox=$(awk -v a="$lat" -v o="$lon" -v k="$km" 'BEGIN {
   dy = k / 2 / 111.2; dx = dy / cos(a * atan2(0, -1) / 180);
   printf "%.5f,%.5f,%.5f,%.5f", o - dx, a - dy, o + dx, a + dy }')
-exec curl -sS "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/export?bbox=$bbox&bboxSR=4326&imageSR=4326&size=$px,$px&format=jpg&f=image"
+# the server sometimes answers with an html error page; that is retried, and
+# never passed on as if it were the picture
+t=$(mktemp)
+for i in 1 2; do
+  curl -sS -o "$t" "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/export?bbox=$bbox&bboxSR=4326&imageSR=4326&size=$px,$px&format=jpg&f=image"
+  [ "$(head -c 2 "$t" | od -An -tx1 | tr -d ' ')" = ffd8 ] && cat "$t" && rm "$t" && exit
+  sleep 3
+done
+rm "$t"
+echo "frame: the imagery server has no picture here, as is common offshore;" \
+  "judge the site from the archive instead" >&2
+exit 1

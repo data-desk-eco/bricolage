@@ -178,7 +178,7 @@ static char *infer(const char *body, char **err)
 typedef struct {
     const char *target, *brief, *key, *shell;
     char *first, *attempt, *usage, *row, *tools, *dir, **envp;
-    int turn, turns, done;
+    int turn, turns, done, prodded;
 } Attempt;
 
 static char *logrow(Attempt *a, const char *kind, const char *tool, const char *detail, const char *text)
@@ -447,7 +447,10 @@ static void turn(Attempt *a, const char *system, char **messages)
     /* deepseek ends a turn of only server searches with tool_use, not pause_turn */
     int paused = !n && stop && (!strcmp(stop, "pause_turn") || !strcmp(stop, "tool_use"));
     sqlite3_free(stop);
-    if (!n && !paused && !settled(a)) {
+    /* a reply with no call and no row is reminded once, not failed: a small
+       model often gives its answer as text first */
+    int prod = !n && !paused && !settled(a) && !a->prodded++;
+    if (!n && !paused && !prod && !settled(a)) {
         char *text = q(NULL, sql_no_call, reply);
         sqlite3_free(logrow(a, "error", NULL, text, NULL));
         sqlite3_free(text);
@@ -455,7 +458,7 @@ static void turn(Attempt *a, const char *system, char **messages)
     if (!a->done && !paused) {
         char left[16];
         snprintf(left, sizeof left, "%d", a->turns - a->turn);
-        char *nudged = a->turns - a->turn <= 3 ? q(NULL, sql_nudge, results, left, a->target) : NULL;
+        char *nudged = prod || a->turns - a->turn <= 3 ? q(NULL, sql_nudge, results, left, a->target) : NULL;
         next = q(NULL, sql_message, *messages, "user", nudged ? nudged : results);
         sqlite3_free(nudged);
         sqlite3_free(*messages);
@@ -563,7 +566,7 @@ static char *skills(const char *dir)
             }
             if (f) fclose(f);
             if (name && desc) {
-                char *t = sqlite3_mprintf("%s\n- %s: %s (%s)", s, name, desc, g.gl_pathv[i] + strlen(dir) + 1);
+                char *t = sqlite3_mprintf("%s\n- %s: %s (`cat %s`)", s, name, desc, g.gl_pathv[i] + strlen(dir) + 1);
                 sqlite3_free(s);
                 s = t;
             }
@@ -574,7 +577,8 @@ static char *skills(const char *dir)
     sqlite3_free(pat);
     if (*s) {
         char *t = sqlite3_mprintf("\n\nskills are what has already been worked out for this job."
-            " `cat` one before its first use, relative to the working directory; its scripts are on your path.%s", s);
+            " read one with the command beside it before its first use: every command starts in the"
+            " working directory, which holds skills/, and a skill's scripts are on your path.%s", s);
         sqlite3_free(s);
         s = t;
     }

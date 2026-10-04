@@ -5,7 +5,12 @@ description: Read web pages and PDFs. `page URL` returns a page as text.
 # Web pages
 
 Find pages with the web search tool, searching in the local language as
-well as English. Read a page with `page`:
+well as English. Without one, search through `page`, then read the results
+you need at their own address:
+
+    page 'https://html.duckduckgo.com/html/?q=zaap+c+platform+pemex' text
+
+Read a page with `page`:
 
     page https://example.org/permit/1234          # text with links
     page https://example.org/permit/1234 text     # text only

@@ -71,6 +71,25 @@ begin
     'high or medium confidence needs at least one evidence url, or drop to low');
 end;
 
+-- a url is evidence only if this plume's session met it: in a tool's output,
+-- a command other than the insert, or a search result. one written from
+-- memory is refused, and so is an imagery request, which is a picture and
+-- not a source
+create trigger if not exists plume_source_evidence before insert on plume_source
+  when exists (select 1 from json_each(new.evidence) e
+    where e.value like '%/MapServer/export?%'
+       or not exists (select 1 from bric_log l where l.key = new.key and (
+      l.kind = 'receipt' and instr(l.text, e.value)
+      or l.kind = 'call' and l.detail not like '{"command":"db %'
+        and instr(l.detail, e.value)
+      or l.kind = 'reply' and exists (select 1 from json_each(l.detail) b
+        where b.value ->> 'type' = 'web_search_tool_result'
+          and instr(b.value, e.value)))))
+begin
+  select raise(abort, 'evidence holds only urls met in this session: '
+    || 'pages you fetched, or a search or the archive returned; not imagery');
+end;
+
 -- the sweep: a claim that names an operator is resolved to the register
 -- entity behind it, so the published row carries an id and not only a string
 create table if not exists claim (
