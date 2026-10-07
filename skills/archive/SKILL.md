@@ -1,6 +1,6 @@
 ---
 name: archive
-description: The Data Desk methane archive. Query plumes, mapped infrastructure, attributions and company registers with `q "select ..."`. Read this first.
+description: The Data Desk archive. Query methane plumes, gas flares, mapped infrastructure, attributions and company registers with `q "select ..."`. Read this first.
 ---
 # The archive
 
@@ -16,6 +16,8 @@ These tables are available:
 | `entities()` | GEM's company register | `entity_id`, `name`, `full_name`, `name_local`, `name_other`, `lei`, `permid`, `gem_parents_ids`, `hq_country` |
 | `owners()` | GEM's ownership records, for assets and companies | `subject_kind` (asset or entity), `subject_id`, `owner_id`, `owner_name`, `share_pct` |
 | `gleif()` | Every name GLEIF holds for each LEI | `id` (GLEIF: and the LEI), `name`, `kind` (legal, trading, translit, alternative, previous) |
+| `flares()` | VIIRS Nightfire's 20,000 catalogued gas flares and hot spots | `id`, `lat`, `lon`, `cell` (H3), `country`, `detail` (EOG's class), `first_seen`, `last_seen`, `detections`, `observations`, `flags` |
+| `nightfire(id, cell)` | One flare's nightly VIIRS detections, from its `id` and `cell` | `date`, `satellite`, `rh_mw` (radiant heat, MW), `temp_k` (flame temperature, K) |
 | `detections(tile)` | Sentinel-2 detections for one MGRS tile, such as '30UVE' | |
 
 A GEM feature `GEM:L100…` is the asset `L100…` in `owners()`.

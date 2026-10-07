@@ -11,6 +11,8 @@ create macro attributions() as table select * from read_parquet(bucket('data-des
 create macro entities() as table select * from read_parquet(bucket('gem/source/entities.parquet'));
 create macro owners() as table select * from read_parquet(bucket('gem/source/ownership.parquet'));
 create macro gleif() as table select * from read_parquet(bucket('gleif/source/data.parquet'));
+create macro flares() as table select id, lat, lon, cell, country, detail, first_seen, last_seen, detections, observations, flags from read_parquet(bucket('eog/flares/data.parquet'));
+create macro nightfire(id0, cell0) as table select date, satellite, rh_mw, temp_k from read_parquet(bucket('eog/detections/cell=' || cell0 || '/data.parquet')) where site_id = id0 and valid order by date;
 create macro detections(tile) as table select * from read_parquet(bucket('views/detections/mgrs=' || tile || '/data.parquet'));
 create macro near(lat0, lon0, km) as table
   select *, 111.2 * sqrt(((lat - lat0)) ^ 2 + ((lon - lon0) * cos(radians(lat0))) ^ 2) as km
