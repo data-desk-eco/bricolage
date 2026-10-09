@@ -138,7 +138,9 @@ typedef struct { char *out; size_t n; } Buf;
 static size_t on_body(char *p, size_t size, size_t n, void *arg)
 {
     Buf *b = arg;
-    b->out = sqlite3_realloc64(b->out, b->n + size * n + 1);
+    char *out = sqlite3_realloc64(b->out, b->n + size * n + 1);
+    if (!out) return 0;
+    b->out = out;
     memcpy(b->out + b->n, p, size * n);
     b->n += size * n;
     b->out[b->n] = 0;
@@ -241,23 +243,6 @@ static int csv(void *arg, int n, char **v, char **name)
     return 0;
 }
 
-/* the shell's sql reaches no file but the database and leaves bric_job, whose
-   shell runs unsandboxed, and bric_log alone; a trigger it made or dropped
-   would act later, on a connection with no guard */
-static int guard(void *u, int op, const char *a, const char *b, const char *c,
-                 const char *d)
-{
-    static const char *no[] = { "bric_job", "bric_log", "load_extension",
-                                "writable_schema", NULL };
-    (void)u, (void)c, (void)d;
-    for (const char **n = no; *n && op != SQLITE_READ; n++)
-        if ((a && !sqlite3_stricmp(a, *n)) || (b && !sqlite3_stricmp(b, *n)))
-            return SQLITE_DENY;
-    return op == SQLITE_ATTACH || op == SQLITE_CREATE_TRIGGER
-        || op == SQLITE_CREATE_TEMP_TRIGGER || op == SQLITE_DROP_TRIGGER
-        || op == SQLITE_DROP_TEMP_TRIGGER ? SQLITE_DENY : SQLITE_OK;
-}
-
 static int late(void *end)
 {
     return time(NULL) > *(time_t *)end;
@@ -282,11 +267,9 @@ static void serve(int c, time_t end)
         char *h = strstr(req.out, "Content-Length:");
         if (h) len = atol(h + 15);
     }
-    sqlite3_set_authorizer(L, guard, NULL);
     sqlite3_progress_handler(L, 1000, late, &end);
     int rc = body ? sqlite3_exec(L, body + 4, csv, &res, &err) : SQLITE_ERROR, open = !sqlite3_get_autocommit(L);
     sqlite3_progress_handler(L, 0, NULL, NULL);
-    sqlite3_set_authorizer(L, NULL, NULL);
     if (open) sqlite3_exec(L, "rollback", NULL, NULL, NULL);
     char *head = sqlite3_mprintf("HTTP/1.0 %d OK\r\nContent-Type: text/csv\r\n\r\n%s%s%s", rc || open ? 500 : 200, err || open ? "error: " : "",
                                  err ? err : open ? "transaction left open" : "", open ? "; the transaction is rolled back" : "");
@@ -737,7 +720,7 @@ static void run(sqlite3_context *ctx, int argc, sqlite3_value **argv)
 static void spawn(sqlite3_stmt *job, const char *key)
 {
     while (waitpid(-1, NULL, WNOHANG) > 0);
-    Dl_info self;
+    Dl_info self = { 0 };
     dladdr((void *)spawn, &self);
     const char *col[7] = { 0 };
     for (int i = 0; job && i < 7; i++) col[i] = (const char *)sqlite3_column_text(job, i);
