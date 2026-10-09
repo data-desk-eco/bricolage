@@ -1,4 +1,4 @@
-import json, os, subprocess, sys, threading, time
+import fcntl, json, os, subprocess, sys, threading, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 URL = 'https://example.org/acme'
@@ -224,8 +224,14 @@ def main():
     time.sleep(1)
     r = sqlite("select count(*) from bric_log where (key = 'chain' or key = 'plain' and attempt = 3) and kind = 'open';")
     assert r.stdout == '0\n', r.stdout
-    r = sqlite(".load ./ext/bric")
+    # a lock the loader holds, as cron's flock does, is not held by its workers
+    lock = open('test/out.lock', 'w')
+    fcntl.flock(lock, fcntl.LOCK_EX)
+    r = subprocess.run([SQLITE, 'test/out.db'], input='.load ./ext/bric',
+                       capture_output=True, text=True, pass_fds=[lock.fileno()])
     assert not r.returncode, r.stderr
+    lock.close()
+    fcntl.flock(open('test/out.lock', 'w'), fcntl.LOCK_EX | fcntl.LOCK_NB)
     # chain_next was inserted by the model's own sqlite3 and picked up when the chain worker exited
     wait("select key from results where key like 'chain%' order by key;", 'chain\nchain_next\n')
     # plain fails every time, and stops being pending at BRIC_ATTEMPTS

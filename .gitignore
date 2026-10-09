@@ -4,3 +4,4 @@
 /ext/
 **/__pycache__/
 /test/out.bin/
+/test/out.lock

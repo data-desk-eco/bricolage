@@ -12,6 +12,7 @@ SQLITE_EXTENSION_INIT1
 #include <string.h>
 #include <unistd.h>
 #include <signal.h>
+#include <dirent.h>
 #include <fcntl.h>
 #include <dlfcn.h>
 #include <poll.h>
@@ -477,7 +478,7 @@ static void turn(Attempt *a, const char *system, char **messages)
     if (!a->done && !paused) {
         char left[16];
         snprintf(left, sizeof left, "%d", a->turns - a->turn);
-        char *nudged = prod || a->turns - a->turn <= 3 ? q(NULL, sql_nudge, results, left, a->target) : NULL;
+        char *nudged = prod || a->turns - a->turn <= 6 ? q(NULL, sql_nudge, results, left, a->target) : NULL;
         next = q(NULL, sql_message, *messages, "user", nudged ? nudged : results);
         sqlite3_free(nudged);
         sqlite3_free(*messages);
@@ -735,6 +736,11 @@ static void spawn(sqlite3_stmt *job, const char *key)
         if (col[6]) setenv("BRIC_SKILLS", col[6], 1);
         int null = open("/dev/null", O_RDWR);
         for (int fd = 0; fd < 3; fd++) dup2(null, fd);
+        /* a worker keeps none of its parent's descriptors: one that held the
+           cron job's lock outlived its run by three days, and no run began */
+        DIR *d = opendir("/dev/fd");
+        for (struct dirent *e; d && (e = readdir(d));)
+            if (atoi(e->d_name) > 2 && atoi(e->d_name) != dirfd(d)) close(atoi(e->d_name));
         execlp(env("BRIC_SQLITE", "sqlite3"), "sqlite3", file, "-cmd", wait, "-cmd", load, sql ? sql : "select 1", (char *)NULL);
         _exit(1);
     }

@@ -32,7 +32,7 @@ create table if not exists plume_source (
   constraint "attributed_ids is a json array of archive ids, or null"
     check (attributed_ids is null
         or (json_valid(attributed_ids) and json_type(attributed_ids) = 'array')),
-  constraint "paragraph is 60 to 100 words"
+  constraint "paragraph is 60 to 100 words: count them with wc -w and cut a sentence before inserting again"
     check (length(trim(paragraph)) - length(replace(trim(paragraph), ' ', ''))
            between 59 and 99),
   constraint "paragraph names no function: write for a reader, not the tools"

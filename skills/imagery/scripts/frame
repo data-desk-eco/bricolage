@@ -4,13 +4,14 @@ lat=$1 lon=$2 km=$3 px=${4:-1200}
 bbox=$(awk -v a="$lat" -v o="$lon" -v k="$km" 'BEGIN {
   dy = k / 2 / 111.2; dx = dy / cos(a * atan2(0, -1) / 180);
   printf "%.5f,%.5f,%.5f,%.5f", o - dx, a - dy, o + dx, a + dy }')
-# the server sometimes answers with an html error page; that is retried, and
-# never passed on as if it were the picture
+# the server answers an html error page where its imagery is coarser than
+# KM / PX (0.8 m a pixel in turkmenistan, 0.4 in java) and, now and then, at
+# random; each is retried with fewer pixels over the same ground, and never
+# passed on as if it were the picture
 t=$(mktemp)
-for i in 1 2; do
-  curl -sS -o "$t" "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/export?bbox=$bbox&bboxSR=4326&imageSR=4326&size=$px,$px&format=jpg&f=image"
+for p in $px $((px * 2 / 3)) $((px / 2)) $((px / 3)) $((px / 5)); do
+  curl -sS -o "$t" "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/export?bbox=$bbox&bboxSR=4326&imageSR=4326&size=$p,$p&format=jpg&f=image"
   [ "$(head -c 2 "$t" | od -An -tx1 | tr -d ' ')" = ffd8 ] && cat "$t" && rm "$t" && exit
-  sleep 3
 done
 rm "$t"
 echo "frame: the imagery server has no picture here, as is common offshore;" \
