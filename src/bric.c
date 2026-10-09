@@ -21,6 +21,7 @@ SQLITE_EXTENSION_INIT1
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <sys/stat.h>
+#include <sys/time.h>
 #include <limits.h>
 #include "sql.h"
 #if defined(__APPLE__) && __MAC_OS_X_VERSION_MAX_ALLOWED >= 260000 || defined(__GLIBC__) && (__GLIBC__ > 2 || __GLIBC_MINOR__ >= 41)
@@ -64,15 +65,16 @@ static char *q(int *rc, const char *sql, ...)
 
 static void squeeze(char *s)
 {
-    char *w = s;
+    char *w = s, *plain = s;
     int space = 0;
     for (char *r = s; *r; r++) {
-        if (!strncmp(r, "data:", 5)) {
+        if (r >= plain && !strncmp(r, "data:", 5)) {
             char *e = r;
             while (*e && !strchr(" )\n\"'", *e)) e++;
             for (char *p = r; p + 8 <= e; p++)
                 if (!memcmp(p, ";base64,", 8)) { r = e - 1; break; }
             if (r == e - 1) continue;
+            plain = e;
         }
         unsigned char c = *r;
         int n = c < 0x80 ? 1 : c < 0xc2 ? 0 : c < 0xe0 ? 2 : c < 0xf0 ? 3 : c < 0xf5 ? 4 : 0;
@@ -239,8 +241,38 @@ static int csv(void *arg, int n, char **v, char **name)
     return 0;
 }
 
-static void serve(int c)
+/* the shell's sql reaches no file but the database and leaves bric_job, whose
+   shell runs unsandboxed, and bric_log alone; a trigger it made or dropped
+   would act later, on a connection with no guard */
+static int guard(void *u, int op, const char *a, const char *b, const char *c,
+                 const char *d)
 {
+    static const char *no[] = { "bric_job", "bric_log", "load_extension",
+                                "writable_schema", NULL };
+    (void)u, (void)c, (void)d;
+    for (const char **n = no; *n && op != SQLITE_READ; n++)
+        if ((a && !sqlite3_stricmp(a, *n)) || (b && !sqlite3_stricmp(b, *n)))
+            return SQLITE_DENY;
+    return op == SQLITE_ATTACH || op == SQLITE_CREATE_TRIGGER
+        || op == SQLITE_CREATE_TEMP_TRIGGER || op == SQLITE_DROP_TRIGGER
+        || op == SQLITE_DROP_TEMP_TRIGGER ? SQLITE_DENY : SQLITE_OK;
+}
+
+static int late(void *end)
+{
+    return time(NULL) > *(time_t *)end;
+}
+
+/* BRIC_TIMEOUT holds while the shell is served: a client that sends nothing
+   or reads nothing, or a query that runs on, ends at the deadline. the
+   connection closes on exec, or a worker spawned by its insert holds it and
+   the client waits for that worker to finish */
+static void serve(int c, time_t end)
+{
+    struct timeval tv = { end > time(NULL) ? end - time(NULL) : 1, 0 };
+    fcntl(c, F_SETFD, FD_CLOEXEC);
+    setsockopt(c, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv);
+    setsockopt(c, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof tv);
     Buf req = { sqlite3_mprintf(""), 0 }, res = { sqlite3_mprintf(""), 0 };
     char chunk[65536], *body = NULL, *err = NULL;
     long len = -1;
@@ -250,12 +282,16 @@ static void serve(int c)
         char *h = strstr(req.out, "Content-Length:");
         if (h) len = atol(h + 15);
     }
+    sqlite3_set_authorizer(L, guard, NULL);
+    sqlite3_progress_handler(L, 1000, late, &end);
     int rc = body ? sqlite3_exec(L, body + 4, csv, &res, &err) : SQLITE_ERROR, open = !sqlite3_get_autocommit(L);
+    sqlite3_progress_handler(L, 0, NULL, NULL);
+    sqlite3_set_authorizer(L, NULL, NULL);
     if (open) sqlite3_exec(L, "rollback", NULL, NULL, NULL);
     char *head = sqlite3_mprintf("HTTP/1.0 %d OK\r\nContent-Type: text/csv\r\n\r\n%s%s%s", rc || open ? 500 : 200, err || open ? "error: " : "",
                                  err ? err : open ? "transaction left open" : "", open ? "; the transaction is rolled back" : "");
-    for (const char *p = head, *e = p + strlen(p); p < e && (n = write(c, p, e - p)) > 0; p += n);
-    for (const char *p = res.out, *e = p + res.n; p < e && (n = write(c, p, e - p)) > 0; p += n);
+    for (const char *p = head, *e = p + strlen(p); p < e && (n = send(c, p, e - p, MSG_NOSIGNAL)) > 0; p += n);
+    for (const char *p = res.out, *e = p + res.n; p < e && (n = send(c, p, e - p, MSG_NOSIGNAL)) > 0; p += n);
     sqlite3_free(head);
     sqlite3_free(err);
     sqlite3_free(req.out);
@@ -325,7 +361,7 @@ static char *shell(Attempt *a, const char *script, char **images)
         }
         if (pf[1].revents) {
             int c = accept(sock, NULL, NULL);
-            if (c >= 0) serve(c);
+            if (c >= 0) serve(c, start + limit);
             if (!pf[0].revents) continue;
         }
         ssize_t n = read(out[0], chunk, sizeof chunk);
@@ -422,7 +458,7 @@ static void turn(Attempt *a, const char *system, char **messages)
         char *id = q(NULL, sql_field, calls, index, "id");
         char *shown, *images = NULL;
         sqlite3_free(logrow(a, "call", name, input, NULL));
-        if (!strcmp(name, "sh")) {
+        if (name && !strcmp(name, "sh")) {
             char *script = q(NULL, sql_field, input, "$", "command");
             char *text = script ? shell(a, script, &images)
                 : sqlite3_mprintf("error: sh takes {\"command\": \"...\"}, and this call carried %s", input);
@@ -512,7 +548,7 @@ static char **childenv(const char *dir)
 }
 
 static const char db_script[] = "#!/bin/sh\n# db \"sql\" - run sql against the research database, csv with a header row; the argument or stdin\n"
-    "exec curl -s --fail-with-body --unix-socket \"$BRIC_DB\" --data-binary \"${1:-@-}\" http://db/\n";
+    "exec curl -s --fail-with-body -H Expect: --unix-socket \"$BRIC_DB\" --data-binary \"${1:-@-}\" http://db/\n";
 
 static const char *cp_from, *cp_to;
 
@@ -705,7 +741,7 @@ static void spawn(sqlite3_stmt *job, const char *key)
     dladdr((void *)spawn, &self);
     const char *col[7] = { 0 };
     for (int i = 0; job && i < 7; i++) col[i] = (const char *)sqlite3_column_text(job, i);
-    char *load = sqlite3_mprintf(".load %s", self.dli_fname);
+    char *load = sqlite3_mprintf(".load '%s'", self.dli_fname);
     char *wait = sqlite3_mprintf("pragma busy_timeout = %d; begin immediate; commit", 1000 * atoi(env("BRIC_TIMEOUT", "120")));
     char *sql = job ? sqlite3_mprintf("select run(%Q, %Q, key, %Q) from \"%w\" where \"key\" = %Q", col[1], col[2], col[3], col[0], key) : NULL;
     if (!fork()) {
