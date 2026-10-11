@@ -1,7 +1,7 @@
 #!/bin/sh
 # q "select ..." — one csv query against the archive; builds archive.db on first use
 db=${ARCHIVE_DB:-archive.db}
-# infrastructure is one object per cell, which only s3 can glob: anonymously
+# infrastructure is mostly one object per cell, which only s3 can glob: anonymously
 s3="create secret (type s3, key_id '', secret '', region 'WAW3-2',
   endpoint 's3.WAW3-2.cloudferro.com', url_style 'path');"
 # a database older than this script holds old macros: build it again
@@ -10,7 +10,9 @@ install httpfs; install spatial; install h3 from community;
 load httpfs; load spatial; load h3; $s3
 create macro bucket(p) as 'https://s3.WAW3-2.cloudferro.com/data-desk-archive/' || p;
 create macro plumes() as table select id, provider as src, lat, lon, date as dt, rate_kg_h as rate, rate_std_kg_h as unc, satellite as sat, link, overlay, bounds from read_parquet(list_transform(['carbon-mapper', 'imeo', 'sron', 'data-desk'], lambda p: bucket(p || '/detections/data.parquet')), union_by_name = true) where kind = 'plume' and valid;
-create macro features() as table select id, provider as dataset, kind, name, operator, status, fuel, lat, lon, cell, geometry from read_parquet(list_transform(['ogim', 'osm', 'gem', 'mapstand', 'netl'], lambda p: 's3://data-desk-archive/' || p || '/infrastructure/**/data.parquet'), union_by_name = true);
+create macro infra(ps) as table select id, provider as dataset, kind, name, operator, status, fuel, lat, lon, cell, geometry from read_parquet(list_transform(ps, lambda p: 's3://data-desk-archive/' || p || '/infrastructure/**/data.parquet'), union_by_name = true);
+-- gem is one object and the rest one per cell: a read mixing the two layouts stops pruning on the path
+create macro features() as table from infra(['ogim', 'osm', 'mapstand', 'netl']) union all by name from infra(['gem']);
 create macro attributions() as table select * from read_parquet(bucket('data-desk/attributions/data.parquet'));
 create macro entities() as table select * from read_parquet(bucket('gem/source/entities.parquet'));
 create macro owners() as table select * from read_parquet(bucket('gem/source/ownership.parquet'));
