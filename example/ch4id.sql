@@ -8,7 +8,8 @@ create table if not exists plume_source (
   key            text primary key,
   source_label   text not null,
   source_kind    text not null check (
-    source_kind in ('well', 'facility', 'pipeline', 'mine', 'landfill', 'other', 'none')
+    source_kind in ('well', 'facility', 'pipeline', 'mine', 'landfill',
+                    'natural', 'other')
   ),
   source_name    text,
   operator       text,
@@ -24,9 +25,8 @@ create table if not exists plume_source (
   constraint "source_label is one to eight words"
     check (length(trim(source_label)) > 0
        and length(source_label) - length(replace(source_label, ' ', '')) < 8),
-  constraint "a source has a position and none has none"
-    check ((source_kind = 'none') = (lat is null and lon is null)
-       and (lat is null) = (lon is null)),
+  constraint "every plume has a source position, the plume's own if no other"
+    check (lat is not null and lon is not null),
   constraint "lat and lon are degrees"
     check (lat between -90 and 90 and lon between -180 and 180),
   constraint "attributed_ids is a json array of archive ids, or null"
@@ -37,6 +37,9 @@ create table if not exists plume_source (
            between 59 and 99),
   constraint "paragraph names no function: write for a reader, not the tools"
     check (paragraph not like '%()%'),
+  constraint "paragraph is in the third person: no I or we"
+    check (' ' || paragraph not glob '*[ (]I [a-z]*'
+       and ' ' || lower(paragraph) not glob '*[ (]we [a-z]*'),
   constraint "evidence is a json array of urls, or null"
     check (evidence is null
         or (json_valid(evidence) and json_type(evidence) = 'array'))
@@ -66,9 +69,24 @@ end;
 create trigger if not exists plume_source_confidence before insert on plume_source
   when new.confidence in ('high', 'medium')
    and (new.evidence is null or json_array_length(new.evidence) = 0)
+   or new.confidence = 'high'
+   and (new.attributed_ids is null or json_array_length(new.attributed_ids) = 0)
+begin
+  select raise(abort, 'high or medium confidence needs an evidence url, and
+high a mapped feature in attributed_ids, or drop a level');
+end;
+
+-- a reader opens the evidence: a page, not an api call, a search or a
+-- short link
+create trigger if not exists plume_source_pages before insert on plume_source
+  when exists (select 1 from json_each(new.evidence)
+    where value glob '*[/.]api[./]*' or value like '%/api.php%'
+       or value like '%duckduckgo.%' or value like '%google.%/search%'
+       or value like '%bing.com/search%' or value like '%goo.gl/%'
+       or value like '%bit.ly/%')
 begin
   select raise(abort,
-    'high or medium confidence needs at least one evidence url, or drop to low');
+    'evidence is a page a reader can open: no api calls, searches or short links');
 end;
 
 -- a url is evidence only if this plume's session met it: in a tool's output,
@@ -162,19 +180,31 @@ Method
    and China are published only in Russian, Arabic, Spanish, Portuguese
    or Chinese. Read a page before you rely on it.
 
-Earlier attributions in the archive are other models'' unreviewed
-claims. Use them only as leads to check.
+Earlier attributions in the archive are other models'' claims: use
+them only as leads to check. Other plumes at the same site are being
+attributed beside you: before you insert, read this run''s plume_source
+rows within 2 km. Where they describe your site, use the same label,
+kind, name and operator unless your evidence differs, and then say why.
+
+Every plume gets an answer. When no equipment is identified, name the
+area at the plume''s position, as in "Unmapped emitter, Dovletabad
+field", at low confidence.
 
 Output
 
-- source_label: the source, in one to eight words.
-- source_kind: the type of equipment that emits the methane.
+- source_label: the source, in one to eight words, no more specific
+  than the paragraph: name a shaft or a pad only if it is seen.
+- source_kind: the type of equipment that emits the methane; natural for
+  a geological seep or mud volcano, other when it is not known.
 - source_name, operator: the facility and its operator, as sources name
-  them.
+  them. Fill operator only when a record names it for this site; an
+  operator inferred from a field, licence or nearby site goes in the
+  paragraph as likely, not here.
 - attributed_ids: the archive IDs of the mapped features at the site,
   the facility or equipment that emits first. Search the archive near
-  the source for its ID. A licence area, field or basin outline is not
-  a source: leave it out.
+  the source for its ID. A licence area, field, basin or mine centroid
+  kilometres away is not a source, and nor is a feature the paragraph
+  rules out: leave them out.
 - lat, lon: the position of the source. Use the plume''s position only if
   the source is there.
 - confidence: certainty that the methane comes from this site, ignoring
@@ -189,9 +219,12 @@ Output
 - paragraph: 80 to 100 words for a reader who has not seen your work:
   the source, the evidence that places the emission there (including
   what the imagery shows) and what remains uncertain. Plain English,
-  short sentences. No tools, tables, IDs or account of your steps.
-- evidence: the URLs you read. An archive file is not evidence: cite
-  the provider''s page or the record the row came from.
+  short sentences, in the third person. No tools, tables, IDs or
+  account of your steps, and no figure or ranking a source does not
+  give.
+- evidence: the pages you read, as a reader would open them. An
+  archive file, an api call or a search is not evidence: cite the
+  provider''s page or the record the row came from.
 
 An honest low-confidence answer is better than a confident guess.',
   './skills/{archive,imagery,carbon-mapper,web}'
