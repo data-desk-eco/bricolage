@@ -30,8 +30,9 @@ Examples:
 
 Rules:
 
-- Search around a point with `near()`. A query on `features()` without a
-  position filter takes minutes.
+- Search around a point with `near()`, which opens only the archive's cells
+  around it. A query on `features()` opens every cell, even with a position
+  filter, and takes about a minute.
 - Filter `gleif()` by name. It holds four million names.
 - Ask for the rows you need. If a query returns more than a few hundred
   rows, narrow it. Do not download whole files.
