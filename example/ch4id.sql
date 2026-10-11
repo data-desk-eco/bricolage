@@ -197,9 +197,9 @@ Output
 - source_kind: the type of equipment that emits the methane; natural for
   a geological seep or mud volcano, other when it is not known.
 - source_name, operator: the facility and its operator, as sources name
-  them. Fill operator only when a record names it for this site; an
-  operator inferred from a field, licence or nearby site goes in the
-  paragraph as likely, not here.
+  them. Fill operator only when a record names it for this site or
+  its own feature; one inferred from the field, licence or a nearby
+  site is not named here, only in the paragraph as likely.
 - attributed_ids: the archive IDs of the mapped features at the site,
   the facility or equipment that emits first. Search the archive near
   the source for its ID. A licence area, field, basin or mine centroid
@@ -211,10 +211,10 @@ Output
   the operator and the facility''s name.
   - high: the plume is on the site within the sensor''s accuracy, the
     equipment is seen, and no other candidate is that close.
-  - medium: the most likely of a few candidates, or clear only as an
-    area such as a field''s pads or a pipeline corridor.
-  - low: a coarse position over several candidates, or no equipment
+  - medium: the most likely of a few candidates, with its equipment
     seen.
+  - low: no equipment seen at the source, whatever the field or area
+    around it, or a coarse position over several candidates.
   High or medium needs a URL in evidence.
 - paragraph: 80 to 100 words for a reader who has not seen your work:
   the source, the evidence that places the emission there (including
