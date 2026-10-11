@@ -72,7 +72,7 @@ feature as (
   select id, provider, kind, name, operator, lat, lon, geometry
   from read_parquet(list_transform(
       ['ogim', 'osm', 'gem', 'mapstand', 'netl'],
-      lambda p: bucket(p || '/infrastructure/data.parquet')),
+      lambda p: bucket(p || '/infrastructure/**/data.parquet')),
       union_by_name = true), box
   where lat between a and b and lon between c and d
 ),
