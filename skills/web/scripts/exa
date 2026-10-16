@@ -1,0 +1,7 @@
+#!/bin/sh
+# exa ENDPOINT JSON — a post to exa's api with EXA_API_KEY, the key on stdin
+# so no process listing shows it
+[ -n "$EXA_API_KEY" ] || { echo 'exa: no EXA_API_KEY (is it in BRIC_PASS?)'
+  exit 1; }
+printf 'x-api-key: %s\n' "$EXA_API_KEY" | curl -sS -m 120 -H @- \
+  -H 'content-type: application/json' "https://api.exa.ai/$1" -d "$2"

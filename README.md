@@ -43,9 +43,8 @@ sqlite3 research.db -cmd '.load ./ext/bric' \
 
 The example creates a `company` source table, a `company_parent` result
 table and a job in `bric_job`. Inserting a company starts an agent. Agents
-need `sh` and `curl`; browser skills also need
-[Obscura](https://github.com/h4ckf0r0day/obscura) installed where the shell
-can find it.
+need `sh`, `curl` and `jq`. The web skill reads through [Exa](https://exa.ai):
+set `EXA_API_KEY` and add it to `BRIC_PASS` (see [Sandbox](#sandbox)).
 
 Workers run in the background, up to `BRIC_WORKERS` at once (default 4).
 They continue after the SQLite connection closes. Loading the extension
@@ -93,8 +92,8 @@ checks a quotation against a page an agent has read, named by its url.
 Jobs can load [Agent Skills](https://agentskills.io) for additional
 instructions and scripts. Set `bric_job.skills` to a directory pattern such
 as `./skills/{archive,web}`. Skill scripts become shell commands; the web
-skill provides `page URL` to read a page through Obscura, keeping it in
-`bric_fetch`.
+skill provides `search QUERY` and `page URL`, which read through Exa's API,
+and `page` keeps each page in `bric_fetch`.
 
 ## Sandbox
 

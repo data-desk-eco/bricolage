@@ -1,0 +1,9 @@
+#!/bin/sh
+# search QUERY [N] — exa's web results: title, url, date and the passages
+# that match, a blank line between results. not kept in bric_fetch: a result
+# is not a page until you read it
+exa search "$(jq -nc --arg q "$1" --argjson n "${2:-10}" '{query: $q,
+  numResults: $n, contents: {highlights: {maxCharacters: 600}}}')" |
+  jq -r '.results[]? // error(tostring)
+    | "\(.title)\n\(.url)\n\(.publishedDate // "" | .[:10])\n"
+      + (.highlights // [] | join(" … ")) + "\n"' 2>&1

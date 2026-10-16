@@ -1,13 +1,19 @@
 #!/bin/sh
-# page URL [markdown|text|links|html|shot] — one web page read through a
-# browser, or a pdf's text; shot prints a png. every read is kept in
-# bric_fetch, so a row cites the url and the output can be piped at will.
-case ${2:-markdown}$1 in
-  shot*) exec obscura fetch "$1" --screenshot /dev/stdout --quiet ;;
-  *.pdf|*.pdf\?*) t=$(curl -sfL "$1" | pdftotext -layout - -) ;;
-  *) t=$(obscura fetch "$1" --dump "${2:-markdown}" --quiet) ;;
-esac || { printf '%s\n' "$t"; exit 1; }
-e() { printf %s "$1" | sed -E "s/'/''/g; s/\]\([^)]*\)/]/g"; }
-[ -z "$t" ] || printf "insert into bric_fetch (url, text) values ('%s', \
-squeeze('%s'))" "$(e "$1")" "$(e "$t")" | db >/dev/null 2>&1 || :
+# page URL [text|links] — one web page or pdf as text through exa, fetched
+# live when exa has no copy; links lists the page's links instead. every read
+# is kept in bric_fetch, so a row cites the url and the output can be piped
+# at will. a page exa cannot read fails and is not kept.
+r=$(exa contents "$(jq -nc --arg u "$1" \
+  '{urls: [$u], text: true, extras: {links: 500}, livecrawlTimeout: 30000}')")
+printf %s "$r" | jq -e '.statuses[0].status == "success"' >/dev/null || {
+  printf %s "$r" | jq -r '"page: exa could not read it: \(.statuses[0].error
+    .tag? // .error // .statuses[0].status // "no result")"' 2>/dev/null ||
+    echo "$r"
+  exit 1; }
+[ "$2" != links ] || { printf %s "$r" | jq -r '.results[0].extras.links[]'
+  exit; }
+t=$(printf %s "$r" | jq -r '.results[0] | "\(.title // "")\n\n\(.text)"')
+printf "insert into bric_fetch (url, text) values ('%s', squeeze('%s'))" \
+  "$(printf %s "$1" | sed "s/'/''/g")" "$(printf %s "$t" | sed "s/'/''/g")" |
+  db >/dev/null 2>&1 || :
 printf '%s\n' "$t"
