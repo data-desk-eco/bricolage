@@ -1,0 +1,12 @@
+# a branch the jump host's ch4id audit pushes becomes a pull request, its
+# title and body the commit's
+name: audit
+on: {push: {branches: ['audit/*']}}
+permissions: {contents: read, pull-requests: write}
+jobs:
+  pr:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - env: {GH_TOKEN: '${{ github.token }}'}
+        run: gh pr create --fill --head "$GITHUB_REF_NAME"
