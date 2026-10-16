@@ -5,7 +5,7 @@
 # at will. a page exa cannot read fails and is not kept.
 r=$(exa contents "$(jq -nc --arg u "$1" \
   '{urls: [$u], text: true, extras: {links: 500}, livecrawlTimeout: 30000}')")
-printf %s "$r" | jq -e '.statuses[0].status == "success"' >/dev/null || {
+printf %s "$r" | jq -e '.statuses[0].status == "success"' >/dev/null 2>&1 || {
   printf %s "$r" | jq -r '"page: exa could not read it: \(.statuses[0].error
     .tag? // .error // .statuses[0].status // "no result")"' 2>/dev/null ||
     echo "$r"
