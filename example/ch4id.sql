@@ -81,6 +81,7 @@ end;
 create trigger if not exists plume_source_pages before insert on plume_source
   when exists (select 1 from json_each(new.evidence)
     where value glob '*[/.]api[./]*' or value like '%/api.php%'
+       or value like '%nominatim.%' or value like '%/rest/services/%'
        or value like '%duckduckgo.%' or value like '%google.%/search%'
        or value like '%bing.com/search%' or value like '%goo.gl/%'
        or value like '%bit.ly/%')
@@ -202,9 +203,10 @@ Output
   site is not named here, only in the paragraph as likely.
 - attributed_ids: the archive IDs of the mapped features at the site,
   the facility or equipment that emits first. Search the archive near
-  the source for its ID. A licence area, field, basin or mine centroid
-  kilometres away is not a source, and nor is a feature the paragraph
-  rules out: leave them out.
+  the source for its ID. A licence area, field, basin or mine point
+  (GEM:M…) more than a few hundred metres away is not a source, even when
+  a record ties the plume to that mine, and nor is a feature the
+  paragraph rules out: leave them out.
 - lat, lon: the position of the source. Use the plume''s position only if
   the source is there.
 - confidence: certainty that the methane comes from this site, ignoring
