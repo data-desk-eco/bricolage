@@ -1,4 +1,7 @@
 #define _GNU_SOURCE
+#ifndef VERSION
+#define VERSION "dev"
+#endif
 #include <sqlite3ext.h>
 SQLITE_EXTENSION_INIT1
 #include <curl/curl.h>
@@ -164,7 +167,7 @@ static char *infer(const char *body, const char *session, char **err)
         curl_easy_setopt(h, CURLOPT_URL, env("BRIC_URL", "https://api.anthropic.com/v1/messages"));
         curl_easy_setopt(h, CURLOPT_POSTFIELDS, body);
         curl_easy_setopt(h, CURLOPT_HTTPHEADER, hs);
-        curl_easy_setopt(h, CURLOPT_USERAGENT, "bricolage/1.0");
+        curl_easy_setopt(h, CURLOPT_USERAGENT, "bricolage/" VERSION);
         curl_easy_setopt(h, CURLOPT_WRITEFUNCTION, on_body);
         curl_easy_setopt(h, CURLOPT_WRITEDATA, &b);
         curl_easy_setopt(h, CURLOPT_TIMEOUT, atol(env("BRIC_TIMEOUT", "120")));

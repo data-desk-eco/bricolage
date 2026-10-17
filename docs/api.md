@@ -216,7 +216,7 @@ Settings are environment variables inherited by workers.
 | --- | --- | --- |
 | `BRIC_KEY` | None | API key, sent as `x-api-key`. |
 | `BRIC_MODEL` | None | Model name. |
-| `BRIC_URL` | `https://api.anthropic.com/v1/messages` | Anthropic-compatible messages endpoint. |
+| `BRIC_URL` | `https://api.anthropic.com/v1/messages` | Anthropic-compatible messages endpoint, such as OpenCode Go's `https://opencode.ai/inference/go/anthropic/v1/messages`. Requests carry `user-agent: bricolage/<version>` and the attempt in `x-opencode-session`. |
 | `BRIC_PARAMS` | `{}` | JSON parameters applied to the request body. |
 | `BRIC_SHELL` | `sh` | Command used to run scripts. |
 | `BRIC_ATTEMPTS` | `3` | Failure limit per key since its last success. |
