@@ -148,7 +148,7 @@ static size_t on_body(char *p, size_t size, size_t n, void *arg)
     return size * n;
 }
 
-static char *infer(const char *body, char **err)
+static char *infer(const char *body, const char *session, char **err)
 {
     for (int i = 0;; i++) {
         Buf b = { NULL, 0 };
@@ -157,10 +157,14 @@ static char *infer(const char *body, char **err)
         struct curl_slist *hs = curl_slist_append(NULL, "content-type: application/json");
         hs = curl_slist_append(hs, "anthropic-version: 2023-06-01");
         hs = curl_slist_append(hs, key);
+        char *sid = sqlite3_mprintf("x-opencode-session: %s", session);
+        hs = curl_slist_append(hs, sid);
+        sqlite3_free(sid);
         CURL *h = curl_easy_init();
         curl_easy_setopt(h, CURLOPT_URL, env("BRIC_URL", "https://api.anthropic.com/v1/messages"));
         curl_easy_setopt(h, CURLOPT_POSTFIELDS, body);
         curl_easy_setopt(h, CURLOPT_HTTPHEADER, hs);
+        curl_easy_setopt(h, CURLOPT_USERAGENT, "bricolage/1.0");
         curl_easy_setopt(h, CURLOPT_WRITEFUNCTION, on_body);
         curl_easy_setopt(h, CURLOPT_WRITEDATA, &b);
         curl_easy_setopt(h, CURLOPT_TIMEOUT, atol(env("BRIC_TIMEOUT", "120")));
@@ -415,7 +419,7 @@ static void turn(Attempt *a, const char *system, char **messages)
 {
     char *err = NULL;
     char *body = q(NULL, sql_request, env("BRIC_MODEL", ""), system, a->tools, *messages, env("BRIC_PARAMS", "{}"));
-    char *reply = infer(body, &err);
+    char *reply = infer(body, a->attempt, &err);
     sqlite3_free(body);
     if (!reply) {
         sqlite3_free(logrow(a, "error", NULL, err, NULL));
