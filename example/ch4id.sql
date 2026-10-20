@@ -84,10 +84,11 @@ create trigger if not exists plume_source_pages before insert on plume_source
        or value like '%nominatim.%' or value like '%/rest/services/%'
        or value like '%duckduckgo.%' or value like '%google.%/search%'
        or value like '%bing.com/search%' or value like '%goo.gl/%'
-       or value like '%bit.ly/%')
+       or value like '%bit.ly/%' or value not like '%://%/_%')
 begin
   select raise(abort,
-    'evidence is a page a reader can open: no api calls, searches or short links');
+    'evidence is a page a reader can open: no api calls, searches, short links
+or bare home pages');
 end;
 
 -- a url is evidence only if this plume's session met it: in a tool's output,
@@ -206,7 +207,9 @@ Output
   field, mine or licence it belongs to. Search the archive near the
   source for them. A field or mine point (GEM:M…) kilometres away
   belongs here when a record or the operator ties the plume to it. A
-  feature only nearby, or one the paragraph rules out, does not.
+  feature only nearby, or one the paragraph rules out, does not. A page
+  on the field, mine or company that does not place this site ties
+  neither an operator nor a feature to it.
 - lat, lon: the position of the source. Use the plume''s position only if
   the source is there.
 - confidence: certainty that the methane comes from this site, ignoring
