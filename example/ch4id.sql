@@ -201,12 +201,12 @@ Output
   them. Fill operator only when a record names it for this site or
   its own feature; one inferred from the field, licence or a nearby
   site is not named here, only in the paragraph as likely.
-- attributed_ids: the archive IDs of the mapped features at the site,
-  the facility or equipment that emits first. Search the archive near
-  the source for its ID. A licence area, field, basin or mine point
-  (GEM:M…) more than a few hundred metres away is not a source, even when
-  a record ties the plume to that mine, and nor is a feature the
-  paragraph rules out: leave them out.
+- attributed_ids: the archive IDs of the assets responsible, the most
+  specific first: the equipment or facility at the source, then the
+  field, mine or licence it belongs to. Search the archive near the
+  source for them. A field or mine point (GEM:M…) kilometres away
+  belongs here when a record or the operator ties the plume to it. A
+  feature only nearby, or one the paragraph rules out, does not.
 - lat, lon: the position of the source. Use the plume''s position only if
   the source is there.
 - confidence: certainty that the methane comes from this site, ignoring
