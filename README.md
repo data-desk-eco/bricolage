@@ -1,8 +1,8 @@
 # bricolage
 
 Bricolage is a SQLite extension for researching and enriching datasets with
-LLM agents. Add rows to a source table, and agents research each one using
-web search and a shell. They write results to a table you define, with
+LLM agents. Add rows to a source table, and agents research each one with a
+shell and its skills. They write results to a table you define, with
 SQLite constraints and triggers checking their answers. Prompts, tool calls
 and results are logged in the database.
 
@@ -126,9 +126,8 @@ Quitting the app leaves workers running.
 ## Local models
 
 [llama.cpp](https://github.com/ggml-org/llama.cpp)'s `llama-server` answers
-the Anthropic messages API, tool use included. It has no web search, so an
-agent that tries it is told the tool is unknown; jobs that read their
-sources through a skill, like `cargo.sql`, run unchanged:
+the Anthropic messages API, tool use included. Jobs run unchanged, as the
+agent reads the web through the web skill:
 
 ```sh
 llama-server -m model.gguf --port 8089 --jinja -c 65536 --alias local

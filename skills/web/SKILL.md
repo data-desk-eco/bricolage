@@ -5,8 +5,8 @@ description: Search the web and read pages and PDFs through Exa. `search
 ---
 # Web pages
 
-Find pages with the web search tool or with `search`, searching in the local
-language as well as English. `search` prints each result's title, url, date
+Find pages with `search`, searching in the local language as well as
+English. `search` prints each result's title, url, date
 and the passages that match:
 
     search 'zaap c platform pemex'

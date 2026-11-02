@@ -406,7 +406,7 @@ static char *shell(Attempt *a, const char *script, char **images)
 static void tools(Attempt *a)
 {
     char *sh = q(NULL, sql_sh_tool, a->target);
-    a->tools = q(NULL, sql_push, "[{\"type\":\"web_search_20250305\",\"name\":\"web_search\"}]", sh);
+    a->tools = q(NULL, sql_push, "[]", sh);
     sqlite3_free(sh);
 }
 

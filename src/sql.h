@@ -231,7 +231,7 @@ static const char sql_sh_tool[] =
     " || ' (`select url, snippet(bric_page, 0, '''', '''', '' ... '', 48) from bric_page join bric_fetch on bric_fetch.rowid = bric_page.rowid where bric_page match ''x''`). '"
     " || 'a receipt over 20000 characters is cut; read the rest from bric_fetch or narrow the script''s output. '"
     " || 'your key is the first user message, verbatim, or its key when that message is a json object, the row you were given. your answer is the rows in ' || ?1 || ' with that key: insert them with `db` against the ddl in the system prompt. a constraint or trigger failure is your receipt, so correct and retry. '"
-    " || 'a column naming a source takes the url of a page in bric_fetch whose text contains your quote: one you read with `page`, however you piped its output, or one another attempt read. a web_search result is not a page until you read it. '"
+    " || 'a column naming a source takes the url of a page in bric_fetch whose text contains your quote: one you read with `page`, however you piped its output, or one another attempt read. a search result is not a page until you read it. '"
     " || 'a `db` call that leaves a transaction open, as one that fails between begin and commit does, is rolled back. the attempt closes when you end a turn without a tool call, so insert every row first',"
     " 'input_schema', json_object('type', 'object', 'properties', json_object('command', json_object('type', 'string')), 'required', json_array('command')))";
 
