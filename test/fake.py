@@ -1,4 +1,4 @@
-import fcntl, json, os, subprocess, sys, threading, time
+import fcntl, json, os, signal, sqlite3, subprocess, sys, threading, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 URL = 'https://example.org/acme'
@@ -24,6 +24,7 @@ def insert(id, table, **row):
 
 class H(BaseHTTPRequestHandler):
     calls = []
+    hold = False
 
     def log_message(self, *a):
         pass
@@ -42,7 +43,15 @@ class H(BaseHTTPRequestHandler):
         last = results[-1] if results else ''
         md = any(QUOTE in r for r in results)
         quote = 'wholly   owned\nsubsidiary of Globex Corporation'
-        if req['system'].startswith('bare shell'):
+        if req['system'].startswith('quick'):
+            # a held reply is never sent: its worker is killed waiting for it
+            while key.startswith('slow') and H.hold:
+                time.sleep(0.1)
+                if not H.hold:
+                    return
+            time.sleep(0.3)
+            content = [{'type': 'text', 'text': 'no idea'}] if key == 'never' or turn else [insert('q1', 'found', key=key)]
+        elif req['system'].startswith('bare shell'):
             if turn == 0:
                 content = [sh('b1', 'echo "X=$X|S=$SECRET_TEST|P=$PASS_ME"')]
             elif turn == 1:
@@ -123,7 +132,7 @@ def main():
     os.environ['PATH'] = os.path.abspath('test/out.bin') + ':' + os.environ['PATH']
     os.environ.update(SECRET_TEST='leak', PASS_ME='ok', BRIC_PASS=' PASS_ME  OTHER ')
     os.environ.update(SQLITE=SQLITE, BRIC_SQLITE=SQLITE, BRIC_URL=base + '/v1/messages', BRIC_MODEL='fake', BRIC_KEY='secret', BRIC_TIMEOUT='2')
-    for f in ['test/out.db', 'test/out.db-wal', 'test/out.db-shm']:
+    for f in [d + x for d in ('test/out.db', 'test/out2.db') for x in ('', '-wal', '-shm')]:
         if os.path.exists(f):
             os.remove(f)
     r = sqlite('create table company (key text primary key, parent text, source integer);',
@@ -148,8 +157,8 @@ def main():
     assert r.stdout == '1|1\n', r.stdout
     r = sqlite("select kind, input, output, calls, images, age < 60 from bric_attempt where key = 'acme';")
     assert r.stdout == 'close|50|25|7|1|1\n', r.stdout
-    r = sqlite("select json_array_length(detail -> 'tools'), detail ->> 'shell', detail -> 'tools' ->> '$[1].name' from bric_log where key = 'acme' and kind = 'open';")
-    assert r.stdout == '2|sh|sh\n', r.stdout
+    r = sqlite("select json_array_length(detail -> 'tools'), detail ->> 'shell', detail -> 'tools' ->> '$[0].name' from bric_log where key = 'acme' and kind = 'open';")
+    assert r.stdout == '1|sh|sh\n', r.stdout
     r = sqlite("select instr(text, '  '), detail like '%chars: https://example.org/acme' from bric_log where key = 'acme' and kind = 'receipt' and tool = 'sh' order by seq limit 1;")
     assert r.stdout == '0|1\n', r.stdout
     r = sqlite("select group_concat(distinct url), min(instr(text, '  ')) from bric_fetch;")
@@ -209,10 +218,10 @@ def main():
     r = sqlite("select detail ->> 'system' like '%skills are what has already been worked out%- echo: says hello (`cat %/echo/SKILL.md`)' from bric_log where key = 'dyn' and kind = 'open';")
     assert r.stdout == '1\n', r.stdout
 
-    def wait(sql, want):
+    def wait(sql, want, db='test/out.db'):
         for _ in range(100):
             time.sleep(0.2)
-            r = sqlite(sql)
+            r = sqlite(sql, db=db)
             if r.stdout == want:
                 return
         assert r.stdout == want, r.stdout
@@ -239,6 +248,54 @@ def main():
     time.sleep(1)
     r = sqlite(".load ./ext/bric", ".system sleep 1", "select count(*) from bric_log where key = 'plain' and kind in ('open', 'error') and attempt > 3;")
     assert r.stdout == '0\n', r.stdout
+
+    # BRIC_AUTO=0: nothing starts on load or insert
+    os.environ.update(BRIC_AUTO='0', BRIC_WORKERS='1')
+    db = 'test/out2.db'
+    load = '.load ./ext/bric'
+    r = sqlite(load, 'create table item (key text primary key);', 'create table found (key text primary key);',
+               "create trigger more after insert on found when new.key = 'a' begin insert into item values ('a2'); end;",
+               "insert into bric_job (source, target, brief) values ('item', 'found', 'quick: find each item.');",
+               "insert into item values ('a'), ('b'), ('c'), ('d'), ('never');", db=db)
+    r = sqlite(load, '.system sleep 1', 'select count(*) from bric_log;', 'select group_concat(state) from bric_status;', db=db)
+    assert r.stdout == '0\npending,pending,pending,pending,pending\n', r.stdout
+    # bric_process runs every key, a2 too, inserted by a's row, with up to n
+    # workers whatever BRIC_WORKERS, its own children, and fails for never.
+    # the wal is checkpointed though another connection keeps it
+    other = sqlite3.connect(db)
+    other.execute('select count(*) from sqlite_schema').fetchall()
+    process = [SQLITE, db, '-cmd', load]
+    r = subprocess.run(process + ['select bric_process(3)'], capture_output=True, text=True)
+    assert r.returncode and "bric_process: 1 failed, attempts used up: found 'never'" in r.stderr, (r.returncode, r.stderr)
+    assert subprocess.run(['pgrep', '-f', db]).returncode == 1
+    assert os.path.getsize(db + '-wal') == 0
+    r = sqlite(load, "select group_concat(key || ' ' || state, ', ') from (select * from bric_status order by key);",
+               "select max(n) from (select sum(iif(kind = 'open', 1, -1)) over (order by seq) as n from bric_log where kind in ('open', 'close', 'error'));",
+               "select count(*) from bric_log where key = 'never' and kind = 'error';", db=db)
+    assert r.stdout == 'a done, a2 done, b done, c done, d done, never failed\n3\n3\n', r.stdout
+    # SIGTERM, to bric_process alone or to its group as systemd sends it,
+    # stops its workers: each attempt is a stop, not an error, its key is
+    # pending, and it runs on the next call
+    H.hold = True
+    r = sqlite("delete from item where key = 'never'; insert into item values ('slow1'), ('slow2');", db=db)
+    for i, kill in enumerate([os.kill, os.killpg]):
+        p = subprocess.Popen(process + ['select bric_process(2)'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True)
+        wait("select count(*) from bric_log where key like 'slow%' and kind = 'open';", '%d\n' % (2 * i + 2), db=db)
+        r = sqlite(load, "select group_concat(state) from bric_status where key like 'slow%';", db=db)
+        assert r.stdout == 'running,running\n', r.stdout
+        kill(p.pid, signal.SIGTERM)
+        out, err = p.communicate(timeout=10)
+        assert p.returncode and 'bric_process: interrupted' in err, (p.returncode, err)
+        assert subprocess.run(['pgrep', '-f', db]).returncode == 1
+        r = sqlite(load, "select group_concat(state) from bric_status where key like 'slow%';", db=db)
+        assert r.stdout == 'pending,pending\n', r.stdout
+    H.hold = False
+    r = subprocess.run(process + ['select bric_process(2)'], capture_output=True, text=True)
+    assert not r.returncode and r.stdout == '2\n', (r.stdout, r.stderr)
+    r = sqlite("select group_concat(attempt || kind) from (select * from bric_log where key like 'slow%' and kind in ('open', 'close', 'error', 'stop') order by key, seq);", db=db)
+    assert r.stdout == ','.join(['1open,1stop,2open,2stop,3open,3close'] * 2) + '\n', r.stdout
+    other.close()
+    assert not [d for d in os.listdir(os.environ.get('TMPDIR', '/tmp')) if d.startswith('bric.')]
 
     print('ok')
 

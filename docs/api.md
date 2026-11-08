@@ -1,6 +1,6 @@
 # API reference
 
-Loading the extension creates its tables and views and registers four SQL
+Loading the extension creates its tables and views and registers five SQL
 functions. Jobs require a database file; in-memory databases do not start
 background workers.
 
@@ -25,6 +25,28 @@ The attempt ends when the model finishes a turn without a tool call:
 Attempts whose worker process has died can be retried. `run` is only
 callable directly, not from views or triggers. The optional `shell`
 argument overrides `BRIC_SHELL`.
+
+### `bric_process(n)`
+
+Runs the pending keys of every job with up to `n` workers at once, and
+returns when no key is pending and none of its workers is running. Keys
+that become pending during the call, such as keys that a trigger inserts,
+also run. The workers are child processes of the caller and write errors to
+its standard error. `BRIC_WORKERS` does not limit them, and they start no
+background workers.
+
+At the end, `bric_process` checkpoints the WAL with
+`pragma wal_checkpoint(truncate)`. It returns the number of workers it
+started. If a key of any job has used up its attempts, it raises an error
+with the number of such keys and the first of them.
+
+On SIGTERM or SIGINT, `bric_process` starts no more workers and sends
+SIGTERM to its workers. It logs each interrupted attempt as `stop`, then
+raises the error `bric_process: interrupted`. An attempt whose worker
+another process ends with SIGTERM, as systemd does when it stops a unit, is
+also logged as `stop`. A worker that exits with a nonzero status, for
+example because it cannot load the extension, also stops the call with an
+error. `bric_process` is only callable directly.
 
 ### `alive(pid)`
 
@@ -78,13 +100,17 @@ already running or reruns completed keys.
 The extension checks for pending keys when it loads, after a transaction
 inserting source rows commits, and when a worker finishes. Inserts made
 without the extension loaded start work on the next load. Rolled-back
-transactions start nothing. A trigger that inserts one job's results into
-another job's source can chain jobs; see [lng.sql](../example/lng.sql).
+transactions start nothing. With `BRIC_AUTO=0`, none of these start
+workers, and only `bric_process` runs them. A trigger that inserts one
+job's results into another job's source can chain jobs; see
+[lng.sql](../example/lng.sql).
 
 A key is pending if it has no result row, no live attempt, and fewer than
-`BRIC_ATTEMPTS` failures since its last successful attempt. Workers run in
-separate SQLite processes, up to `BRIC_WORKERS` at once, and continue after
-the connection that started them closes.
+`BRIC_ATTEMPTS` failures since its last successful attempt. An interrupted
+attempt is not a failure. Workers run in separate SQLite processes, up to
+`BRIC_WORKERS` at once, and continue after the connection that started them
+closes. Workers that `bric_process` starts are its child processes, up to
+its `n`, and end with it.
 
 To resume pending work:
 
@@ -94,10 +120,10 @@ sqlite3 research.db '.load ./ext/bric'
 
 Delete a key's result rows to research it again. Increase `BRIC_ATTEMPTS`
 to retry keys that have reached the failure limit. To list keys without
-results, substitute your table names in:
+results:
 
 ```sql
-select key from source except select key from target;
+select job, key, state from bric_status where state <> 'done';
 ```
 
 ### Request parameters and skills
@@ -126,6 +152,7 @@ as JSON.
 | `receipt` | Tool result. Shell output is stored in `text`. |
 | `close` | Successful completion, with result rows as a JSON array in `detail`. |
 | `error` | Failure reason in `detail`. |
+| `stop` | Interrupted attempt, logged by `bric_process` on a signal. It is not a failure. |
 
 The log uses `receipt` to mean a tool result. Triggers prevent updates and
 deletes. Removing those protections requires dropping `bric_log_update`
@@ -168,6 +195,23 @@ attempts for that key.
 ```sh
 sqlite3 -box research.db 'select * from bric_attempt'
 ```
+
+## Status: `bric_status`
+
+One row per key in each job's source table, with columns `job` (the job's
+target), `key` and `state`. The states follow the scheduler's rules:
+
+| `state` | Meaning |
+| --- | --- |
+| `done` | The target has a row for this key. |
+| `running` | An attempt is live. |
+| `failed` | `BRIC_ATTEMPTS` failures since the last successful attempt. |
+| `pending` | Any other key. |
+
+The view is rebuilt from `bric_job` when the extension loads, when
+`bric_process` starts and at each attempt, with the `BRIC_ATTEMPTS` setting
+of that process. Queries on it
+require the extension, for `alive`.
 
 ## Conversations: `bric_transcript`
 
@@ -221,6 +265,7 @@ Settings are environment variables inherited by workers.
 | `BRIC_SHELL` | `sh` | Command used to run scripts. |
 | `BRIC_ATTEMPTS` | `3` | Failure limit per key since its last success. |
 | `BRIC_TURNS` | `40` | Model turns per attempt; the last three prompt the model to finish. |
-| `BRIC_WORKERS` | `4` | Maximum concurrent attempts in the database. |
+| `BRIC_WORKERS` | `4` | Maximum concurrent attempts in the database; `bric_process` uses its own `n`. |
+| `BRIC_AUTO` | `1` | `0` starts no workers on load, on insert or after an attempt; only `bric_process` starts them. |
 | `BRIC_SQLITE` | `sqlite3` | SQLite CLI used to launch workers; must support `.load`. |
 | `BRIC_TIMEOUT` | `120` | Timeout in seconds for HTTP calls, shell calls and waiting for a database write lock. |

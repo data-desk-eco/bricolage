@@ -505,6 +505,9 @@ static void schema(void)
     sqlite3_exec(L, "alter table bric_job add column model text", NULL, NULL, NULL);
     sqlite3_exec(L, "alter table bric_job add column params text", NULL, NULL, NULL);
     sqlite3_exec(L, "alter table bric_job add column skills text", NULL, NULL, NULL);
+    char *status = q(NULL, sql_status, STATE, env("BRIC_ATTEMPTS", "3"));
+    sqlite3_exec(L, status, NULL, NULL, NULL);
+    sqlite3_free(status);
 }
 
 /* the shell reads pages an agent was pointed at, so it gets no variable it
@@ -644,7 +647,7 @@ static char *attempt(const char *target, const char *brief, const char *key, con
     if (!ddl) return NULL;
     a.row = q(NULL, sql_row, a.target);
     tools(&a);
-    q(NULL, sql_dead, a.target, a.key);
+    q(NULL, sql_dead, a.target, a.key, "error", "dead: pid %s gone", NULL);
     a.attempt = q(NULL, sql_attempt, a.target, a.key);
     char *closed = q(NULL, a.row, a.key), *source = q(NULL, sql_source, a.target);
     char *row = source ? q(NULL, sql_row, source) : NULL, *given = row ? q(NULL, row, a.key) : NULL;
@@ -652,7 +655,7 @@ static char *attempt(const char *target, const char *brief, const char *key, con
     sqlite3_free(source);
     sqlite3_free(row);
     sqlite3_free(given);
-    a.dir = sqlite3_mprintf("%s/bric.XXXXXX", env("TMPDIR", "/tmp"));
+    a.dir = sqlite3_mprintf("%s/bric.%d.XXXXXX", env("TMPDIR", "/tmp"), getpid());
     if (!mkdtemp(a.dir)) {
         char *err = sqlite3_mprintf("%s: %s", a.dir, strerror(errno));
         sqlite3_free(logrow(&a, "error", NULL, err, NULL));
@@ -707,7 +710,7 @@ static char *attempt(const char *target, const char *brief, const char *key, con
     return kind;
 }
 
-static void dispatch(void);
+static int dispatch(void);
 
 static const char *shell_arg(int argc, sqlite3_value **argv)
 {
@@ -725,9 +728,14 @@ static void run(sqlite3_context *ctx, int argc, sqlite3_value **argv)
     dispatch();
 }
 
-static void spawn(sqlite3_stmt *job, const char *key)
+/* bric_process's workers, its children while it runs */
+static struct { volatile pid_t pid; char *job, *key; } *slot;
+static int slots;
+static volatile sig_atomic_t stopped;
+
+static pid_t spawn(sqlite3_stmt *job, const char *key)
 {
-    while (waitpid(-1, NULL, WNOHANG) > 0);
+    while (!slots && waitpid(-1, NULL, WNOHANG) > 0);
     Dl_info self = { 0 };
     dladdr((void *)spawn, &self);
     const char *col[7] = { 0 };
@@ -735,14 +743,17 @@ static void spawn(sqlite3_stmt *job, const char *key)
     char *load = sqlite3_mprintf(".load '%s'", self.dli_fname);
     char *wait = sqlite3_mprintf("pragma busy_timeout = %d; begin immediate; commit", 1000 * atoi(env("BRIC_TIMEOUT", "120")));
     char *sql = job ? sqlite3_mprintf("select run(%Q, %Q, key, %Q) from \"%w\" where \"key\" = %Q", col[1], col[2], col[3], col[0], key) : NULL;
-    if (!fork()) {
-        setsid();
+    pid_t pid = fork();
+    if (!pid) {
+        /* bric_process's worker keeps its group and stderr; n, not BRIC_WORKERS, caps it */
+        if (!slots) setsid();
+        else setenv("BRIC_AUTO", "0", 1), setenv("BRIC_WORKERS", "999999999", 1);
         if (job) setenv("BRIC_WORKER", "1", 1);
         if (col[4]) setenv("BRIC_MODEL", col[4], 1);
         if (col[5]) setenv("BRIC_PARAMS", col[5], 1);
         if (col[6]) setenv("BRIC_SKILLS", col[6], 1);
         int null = open("/dev/null", O_RDWR);
-        for (int fd = 0; fd < 3; fd++) dup2(null, fd);
+        for (int fd = 0; fd < (slots ? 2 : 3); fd++) dup2(null, fd);
         /* a worker keeps none of its parent's descriptors: one that held the
            cron job's lock outlived its run by three days, and no run began */
         DIR *d = opendir("/dev/fd");
@@ -754,25 +765,100 @@ static void spawn(sqlite3_stmt *job, const char *key)
     sqlite3_free(load);
     sqlite3_free(wait);
     sqlite3_free(sql);
+    return pid;
 }
 
-static void dispatch(void)
+static int dispatch(void)
 {
-    if (!file) return;
-    char *live = q(NULL, sql_live);
-    int free = atoi(env("BRIC_WORKERS", "4")) - atoi(live ? live : "0");
+    if (!file || (!slots && !atoi(env("BRIC_AUTO", "1")))) return 0;
+    char *live = slots ? NULL : q(NULL, sql_live);
+    int free = slots ? 0 : atoi(env("BRIC_WORKERS", "4")) - atoi(live ? live : "0"), n = 0;
     sqlite3_free(live);
+    for (int i = 0; i < slots; i++) free += !slot[i].pid;
     sqlite3_stmt *j, *k;
-    if (free <= 0 || sqlite3_prepare_v2(L, sql_jobs, -1, &j, NULL)) return;
-    while (free > 0 && sqlite3_step(j) == SQLITE_ROW) {
-        char *sql = sqlite3_mprintf(sql_pending, sqlite3_column_text(j, 1), sqlite3_column_text(j, 0), sqlite3_column_text(j, 1), atoi(env("BRIC_ATTEMPTS", "3")), free);
+    if (free <= 0 || sqlite3_prepare_v2(L, sql_jobs, -1, &j, NULL)) return 0;
+    while (n < free && sqlite3_step(j) == SQLITE_ROW) {
+        const char *job = (const char *)sqlite3_column_text(j, 1);
+        char *sql = sqlite3_mprintf(sql_pending, job, atoi(env("BRIC_ATTEMPTS", "3")), job, sqlite3_column_text(j, 0));
         if (!sqlite3_prepare_v2(L, sql, -1, &k, NULL)) {
-            for (; free > 0 && sqlite3_step(k) == SQLITE_ROW; free--) spawn(j, (const char *)sqlite3_column_text(k, 0));
+            while (n < free && sqlite3_step(k) == SQLITE_ROW) {
+                const char *key = (const char *)sqlite3_column_text(k, 0);
+                int i = 0, e = 0;
+                /* a key is pending until its worker logs its open */
+                for (; i < slots && !(slot[i].pid && !strcmp(slot[i].job, job) && !strcmp(slot[i].key, key)); i++)
+                    if (!slot[i].pid) e = i;
+                if (i < slots) continue;
+                pid_t pid = spawn(j, key);
+                n += pid > 0;
+                if (!slots || pid < 0) continue;
+                slot[e].job = sqlite3_mprintf("%s", job);
+                slot[e].key = sqlite3_mprintf("%s", key);
+                slot[e].pid = pid;
+                if (stopped) kill(pid, SIGTERM);
+            }
             sqlite3_finalize(k);
         }
         sqlite3_free(sql);
     }
     sqlite3_finalize(j);
+    return n;
+}
+
+static void halt(int sig)
+{
+    (void)sig;
+    stopped = 1;
+    for (int i = 0; i < slots; i++) if (slot[i].pid) kill(slot[i].pid, SIGTERM);
+}
+
+/* runs every job's pending keys, up to n at once, as its children, until
+   none is pending or running. a signal stops them, and logs a stop */
+static void process(sqlite3_context *ctx, int argc, sqlite3_value **argv)
+{
+    (void)argc;
+    int n = sqlite3_value_int(argv[0]), ran = 0, reaped = 0, bad = 0, rc = 0, sig[] = { SIGTERM, SIGINT };
+    if (!file || n < 1 || !(slot = calloc(n, sizeof *slot)))
+        return sqlite3_result_error(ctx, "bric_process: takes n > 0 and a database file", -1);
+    slots = n;
+    stopped = 0;
+    struct sigaction sa = { .sa_handler = halt }, old[2];
+    for (int i = 0; i < 2; i++) sigaction(sig[i], &sa, &old[i]);
+    schema();
+    for (;;) {
+        if (!stopped && !bad) ran += dispatch();
+        if (reaped == ran) break;
+        int st, i;
+        pid_t pid = waitpid(-1, &st, 0);
+        for (i = 0; i < n && slot[i].pid != pid; i++);
+        if (i == n) continue;
+        reaped++;
+        char p[16];
+        snprintf(p, sizeof p, "%d", (int)pid);
+        /* systemd's stop sends SIGTERM to the workers too, maybe first. a
+           stopped worker leaves its scratch directory */
+        if (stopped || (WIFSIGNALED(st) && WTERMSIG(st) == SIGTERM)) {
+            q(NULL, sql_dead, slot[i].job, slot[i].key, "stop", "stopped: pid %s", p);
+            char *dir = sqlite3_mprintf("%s/bric.%s.*", env("TMPDIR", "/tmp"), p);
+            glob_t g = { 0 };
+            if (!glob(dir, 0, NULL, &g)) nftw(g.gl_pathv[0], unlink_cb, 16, FTW_DEPTH | FTW_PHYS);
+            globfree(&g);
+            sqlite3_free(dir);
+        }
+        if (WIFEXITED(st) && WEXITSTATUS(st)) bad = WEXITSTATUS(st);
+        slot[i].pid = 0;
+        sqlite3_free(slot[i].job);
+        sqlite3_free(slot[i].key);
+    }
+    for (int i = 0; i < 2; i++) sigaction(sig[i], &old[i], NULL);
+    slots = 0;
+    free(slot);
+    q(NULL, "pragma wal_checkpoint(truncate)");
+    char *e = stopped ? sqlite3_mprintf("bric_process: interrupted")
+        : bad ? sqlite3_mprintf("bric_process: a worker exited with status %d", bad) : q(&rc, sql_failed);
+    if (!e && rc) e = sqlite3_mprintf("bric_process: %s", sqlite3_errmsg(L));
+    if (e) sqlite3_result_error(ctx, e, -1);
+    else sqlite3_result_int(ctx, ran);
+    sqlite3_free(e);
 }
 
 static int inserted[2];
@@ -815,19 +901,21 @@ int sqlite3_bric_init(sqlite3 *db, char **err, const sqlite3_api_routines *api)
         sqlite3_exec(L, "pragma journal_mode = wal; pragma synchronous = normal", NULL, NULL, NULL);
         schema();
         sqlite3 *c[] = { db, L };
-        for (int i = 0; i < 2; i++) {
+        for (int i = 0; atoi(env("BRIC_AUTO", "1")) && i < 2; i++) {
             sqlite3_update_hook(c[i], hook, &inserted[i]);
             sqlite3_commit_hook(c[i], committed, &inserted[i]);
             sqlite3_rollback_hook(c[i], rolled_back, &inserted[i]);
         }
     }
-    sqlite3_create_function(L, "alive", 1, SQLITE_UTF8, NULL, alive, NULL, NULL);
+    sqlite3_create_function(L, "alive", 1, SQLITE_UTF8 | SQLITE_INNOCUOUS, NULL, alive, NULL, NULL);
+    sqlite3_create_function(db, "alive", 1, SQLITE_UTF8 | SQLITE_INNOCUOUS, NULL, alive, NULL, NULL);
     sqlite3_create_function(L, "squeeze", 1, SQLITE_UTF8 | SQLITE_DETERMINISTIC, NULL, squeeze_fn, NULL, NULL);
     sqlite3_create_function(db, "squeeze", 1, SQLITE_UTF8 | SQLITE_DETERMINISTIC, NULL, squeeze_fn, NULL, NULL);
     sqlite3_create_function(L, "cites", 2, SQLITE_UTF8 | SQLITE_INNOCUOUS, NULL, cites, NULL, NULL);
     sqlite3_create_function(db, "cites", 2, SQLITE_UTF8 | SQLITE_INNOCUOUS, NULL, cites, NULL, NULL);
     sqlite3_create_function(db, "run", 3, SQLITE_UTF8 | SQLITE_DIRECTONLY, NULL, run, NULL, NULL);
     sqlite3_create_function(db, "run", 4, SQLITE_UTF8 | SQLITE_DIRECTONLY, NULL, run, NULL, NULL);
+    sqlite3_create_function(db, "bric_process", 1, SQLITE_UTF8 | SQLITE_DIRECTONLY, NULL, process, NULL, NULL);
     if (!getenv("BRIC_WORKER")) dispatch();
     return SQLITE_OK;
 }

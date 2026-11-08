@@ -11,7 +11,7 @@ test: ext/bric.$(S)
 	SQLITE=$(SQLITE) python3 test/fake.py
 
 clean:
-	rm -rf ext test/out.db* test/out.bin test/out.lock
+	rm -rf ext test/out*
 
 .PHONY: test clean
 

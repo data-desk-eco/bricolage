@@ -71,6 +71,40 @@ Other examples:
   Aleph entities through the `aleph` skill (set `ALEPH_URL` and
   `ALEPH_API_KEY`, and `BRIC_PASS='ALEPH_URL ALEPH_API_KEY'`).
 
+## Foreground workers
+
+A script or a systemd unit can run the work in the foreground and wait for
+it. Set `BRIC_AUTO=0`, so that loading the extension and inserting keys
+start no background workers, then call `bric_process(n)`:
+
+```sh
+export BRIC_AUTO=0
+sqlite3 research.db -cmd '.load ./ext/bric' 'select bric_process(6)'
+```
+
+`bric_process` runs the pending keys of every job, up to `n` at once, as
+child processes of `sqlite3`. It returns when no key is pending or running,
+then checkpoints the WAL, so the database file alone holds every result.
+`sqlite3` exits with a nonzero status if a key has used up its attempts.
+SIGTERM or SIGINT stops the workers. Their attempts are logged as `stop`,
+which is not a failure, and the next call runs those keys again. In a
+systemd unit:
+
+```ini
+[Service]
+Type=oneshot
+Environment=BRIC_AUTO=0
+ExecStart=/usr/bin/sqlite3 /srv/research.db -cmd '.load /srv/bricolage/ext/bric' 'select bric_process(6)'
+```
+
+`bric_status` gives the state of each key of each job: `pending`,
+`running`, `done` or `failed`:
+
+```sh
+sqlite3 research.db -cmd '.load ./ext/bric' \
+  'select job, state, count(*) from bric_status group by 1, 2'
+```
+
 ## Build
 
 Requires a C compiler, libcurl and SQLite headers.

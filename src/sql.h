@@ -1,5 +1,11 @@
+/* an attempt ends in close, error or stop; a stop, an attempt interrupted,
+   is no failure */
+#define KINDS "kind in ('open', 'close', 'error', 'stop')"
+#define ENDED "kind in ('close', 'error', 'stop')"
+#define PID "max(iif(kind = 'open', detail ->> 'pid', null))"
+
 static const char sql_attempt[] =
-    "select 1 + count(*) from bric_log where job = ?1 and key = ?2 and kind in ('close', 'error')";
+    "select 1 + count(*) from bric_log where job = ?1 and key = ?2 and " ENDED;
 
 static const char sql_calls[] =
     "select json_group_array(json(value)) from json_each(?1, '$.content') where value ->> 'type' = 'tool_use'";
@@ -27,13 +33,19 @@ static const char sql_source[] =
 static const char sql_ddl[] =
     "select sql from sqlite_schema where name = ?1 and type = 'table'";
 
+/* ends, as kind ?3 with detail printf(?4, pid), an attempt whose worker is
+   gone: any, or the one ?5 was running */
 static const char sql_dead[] =
     "insert or ignore into bric_log (job, key, attempt, kind, detail)"
-    " select job, key, attempt, 'error', 'dead: pid ' || coalesce(max(iif(kind = 'open', detail ->> 'pid', null)), 'unknown') || ' gone'"
+    " select job, key, attempt, ?3, printf(?4, coalesce(" PID ", 'unknown'))"
     " from bric_log"
     " where job = ?1 and key = ?2 and attempt is not null"
     " group by attempt"
-    " having sum(kind in ('close', 'error')) = 0 and not alive(max(iif(kind = 'open', detail ->> 'pid', null)))";
+    " having sum(" ENDED ") = 0 and not alive(" PID ") and ifnull(?5, " PID ") is " PID;
+
+static const char sql_failed[] =
+    "select printf('bric_process: %d failed, attempts used up: %.200s', count(*), group_concat(job || ' ' || quote(key), ', '))"
+    " from bric_status where state = 'failed' having count(*)";
 
 static const char sql_first[] =
     "select iif((select count(*) from json_each(?2, '$[0]')) > 1, ?2 ->> '$[0]', ?1)";
@@ -51,12 +63,12 @@ static const char sql_job[] = SQL_JOBS " where source = ?1";
 static const char sql_jobs[] = SQL_JOBS;
 
 static const char sql_kind[] =
-    "select kind from bric_log where job = ?1 and key = ?2 and attempt = ?3 and kind in ('close', 'error')";
+    "select kind from bric_log where job = ?1 and key = ?2 and attempt = ?3 and " ENDED;
 
 #define SQL_LIVE \
     "select count(*) from (" \
-    " select 1 from bric_log where kind in ('open', 'close', 'error') group by job, key, attempt" \
-    " having sum(kind in ('close', 'error')) = 0 and alive(max(iif(kind = 'open', detail ->> 'pid', null))))"
+    " select 1 from bric_log where " KINDS " group by job, key, attempt" \
+    " having sum(kind <> 'open') = 0 and alive(" PID "))"
 
 static const char sql_live[] = SQL_LIVE;
 
@@ -81,17 +93,20 @@ static const char sql_open[] =
     " select ?1, ?2, ?3, 0, 'open', json_object('system', ?4, 'message', ?11, 'pid', ?6, 'tools', json(?7), 'shell', ?8, 'model', ?9, 'params', json(?10))"
     " where cast(?5 as integer) > (" SQL_LIVE ")";
 
-static const char sql_pending[] =
-    "with a as ("
-    " select key, max(seq) as seq, sum(kind = 'close') as closed, sum(kind = 'error') as errs,"
-    " alive(max(iif(kind = 'open', detail ->> 'pid', null))) as up"
-    " from bric_log where job = %Q and kind in ('open', 'close', 'error') group by key, attempt)"
-    " select s.\"key\" from \"%w\" as s"
-    " where not exists (select 1 from \"%w\" as t where t.\"key\" = s.\"key\")"
-    " and not exists (select 1 from a where a.key = s.\"key\" and not closed and not errs and up)"
-    " and (select count(*) from a where a.key = s.\"key\" and errs"
-    " and seq > (select coalesce(max(seq), 0) from a as c where c.key = s.\"key\" and closed)) < %d"
-    " limit %d";
+/* a job's keys as the scheduler sees them, formatted with target,
+   BRIC_ATTEMPTS, target and source: failed has BRIC_ATTEMPTS errors since
+   its last close */
+#define STATE \
+    "select s.job, s.key, case" \
+    " when exists (select 1 from \"%w\" as t where t.\"key\" = s.key) then 'done'" \
+    " when exists (select 1 from bric_log where job = s.job and key = s.key and " KINDS \
+    " group by attempt having sum(kind <> 'open') = 0 and alive(" PID ")) then 'running'" \
+    " when (select count(*) from bric_log where job = s.job and key = s.key and kind = 'error' and seq >" \
+    " (select coalesce(max(seq), 0) from bric_log as c where c.job = s.job and c.key = s.key and c.kind = 'close'))" \
+    " >= %d then 'failed' else 'pending' end as state" \
+    " from (select %Q as job, \"key\" from \"%w\") as s"
+
+static const char sql_pending[] = "select key from (" STATE ") where state = 'pending'";
 
 static const char sql_push[] =
     "select json_insert(?1, '$[#]', json(?2))";
@@ -157,11 +172,11 @@ static const char sql_schema[] =
     " "
     " create index if not exists bric_log_job on bric_log (job, key);"
     " "
-    " create unique index if not exists bric_claim on bric_log (job, key, attempt, kind)"
-    " where kind in ('open', 'close', 'error');"
+    " drop index if exists bric_claim; drop index if exists bric_live;"
+    " create unique index if not exists bric_once on bric_log (job, key, attempt, kind) where " KINDS ";"
     " "
-    " create index if not exists bric_live on bric_log (job, key, attempt, kind, iif(kind = 'open', detail ->> 'pid', null))"
-    " where kind in ('open', 'close', 'error');"
+    " create index if not exists bric_state on bric_log (job, key, attempt, kind, iif(kind = 'open', detail ->> 'pid', null))"
+    " where " KINDS ";"
     " "
     " create table if not exists bric_fetch ("
     " ts   text not null default (datetime('now')),"
@@ -234,6 +249,11 @@ static const char sql_sh_tool[] =
     " || 'a column naming a source takes the url of a page in bric_fetch whose text contains your quote: one you read with `page`, however you piped its output, or one another attempt read. a search result is not a page until you read it. '"
     " || 'a `db` call that leaves a transaction open, as one that fails between begin and commit does, is rolled back. the attempt closes when you end a turn without a tool call, so insert every row first',"
     " 'input_schema', json_object('type', 'object', 'properties', json_object('command', json_object('type', 'string')), 'required', json_array('command')))";
+
+static const char sql_status[] =
+    "select 'drop view if exists bric_status; create view bric_status (job, key, state) as '"
+    " || coalesce(group_concat(printf(?1, target, ?2, target, source), ' union all '), 'select 1, 1, 1 where 0')"
+    " from bric_job";
 
 static const char sql_usage[] =
     "select json_object('input', ?1 ->> '$.usage.input_tokens', 'output', ?1 ->> '$.usage.output_tokens', 'cache_read', ?1 ->> '$.usage.cache_read_input_tokens')";
