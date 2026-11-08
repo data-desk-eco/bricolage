@@ -142,7 +142,7 @@ create trigger if not exists flare_site_evidence before insert on flare_site
        or not exists (select 1 from bric_log l where l.key = new.key and (
       l.kind = 'receipt' and instr(l.text, e.value)
       or l.kind = 'call' and l.detail not like '{"command":"db %'
-        and instr(l.detail, e.value)))))
+        and instr(l.detail, e.value))))
 begin
   select raise(abort,
     'evidence holds only urls this session met, and never imagery');
