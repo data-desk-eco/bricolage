@@ -1,4 +1,8 @@
 #!/bin/sh
-# linux: the system read-only, no home, the scratch directory writable, its own pid space
+# linux: the system read-only, no home but its duckdb extensions and python
+# packages read-only, the scratch directory writable, its own pid space. dns
+# reads /run/systemd/resolve, where systemd-resolved points /etc/resolv.conf
 exec bwrap --ro-bind /usr /usr --ro-bind /etc /etc --ro-bind /opt /opt --symlink usr/bin /bin --symlink usr/lib /lib --symlink usr/lib64 /lib64 \
+  --ro-bind-try /run/systemd/resolve /run/systemd/resolve \
+  --ro-bind-try "$HOME/.duckdb" "$HOME/.duckdb" --ro-bind-try "$HOME/.local/lib" "$HOME/.local/lib" \
   --dev /dev --proc /proc --tmpfs /tmp --bind "$PWD" "$PWD" --unshare-all --share-net --die-with-parent sh "$1"
