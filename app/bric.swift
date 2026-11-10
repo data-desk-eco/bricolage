@@ -12,7 +12,8 @@ struct Job: Identifiable {
 // before the engine stopped naming jobs by their brief
 let Q = """
 select coalesce(j.target, a.job), a.key, case a.kind when 'close' then 'done'
-  when 'error' then 'failed' else 'running' end, a.age, a.calls
+  when 'error' then 'failed' when 'stop' then 'stopped' else 'running' end,
+  a.age, a.calls
 from bric_attempt as a left join bric_job as j on a.job = j.brief
 order by a.ts desc
 """
@@ -135,6 +136,7 @@ struct Dot: View {
       switch state {
       case "done": Image(systemName: "circle.fill")
       case "failed": Image(systemName: "xmark")
+      case "stopped": Image(systemName: "pause")
       case "queued": Image(systemName: "circle")
       default: Image(systemName: "circle.dotted").symbolEffect(.pulse)
       }
@@ -163,7 +165,7 @@ struct JobView: View {
               .frame(width: 30, alignment: .trailing)
           }
           }.contentShape(Rectangle()) }.buttonStyle(.plain)
-          if r.state == "failed" {
+          if ["failed", "stopped"].contains(r.state) {
             Button { m.retry(job.id, r.key) } label: {
               Image(systemName: "arrow.clockwise") }.buttonStyle(.plain)
           }
