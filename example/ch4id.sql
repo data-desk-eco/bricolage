@@ -107,13 +107,21 @@ begin
 end;
 
 -- the sweep: a claim that names an operator is resolved to the register
--- entity behind it, so the published row carries an id and not only a string
+-- entity behind it, so the published row carries an id and not only a
+-- string. a name is resolved once: for the first claim of the run that gives
+-- it, and never if it is in `known`, the names a run imports as resolved
+-- already. the sweep was 15% of the cost of data desk's runs of 9 to 14
+-- november 2026, and over half of its asks were for a name asked before
+create table if not exists known (operator text primary key);
+
 create table if not exists claim (
   key text primary key, operator text, source_name text, attributed_ids text
 );
 
 create trigger if not exists plume_source_claim after insert on plume_source
   when new.operator is not null
+   and new.operator not in (select operator from claim)
+   and new.operator not in (select operator from known)
 begin
   insert or ignore into claim
   values (new.key, new.operator, new.source_name, new.attributed_ids);
